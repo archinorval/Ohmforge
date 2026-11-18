@@ -13,6 +13,41 @@ pub fn thermal_voltage() -> f64 {
     BOLTZMANN * TNOM / CHARGE
 }
 
+/// SPICE reference temperature for the band-gap formulas (27 °C).
+pub const REFTEMP: f64 = 300.15;
+
+/// Thermal voltage kT/q at temperature `t` (K).
+pub fn vt_at(t: f64) -> f64 {
+    BOLTZMANN * t / CHARGE
+}
+
+/// Silicon band gap (eV) at temperature `t` (K).
+pub fn egfet(t: f64) -> f64 {
+    1.16 - (7.02e-4 * t * t) / (t + 1108.0)
+}
+
+/// SPICE3 `pbfact`: temperature shift of a junction potential.
+fn pbfact(t: f64) -> f64 {
+    let arg = -egfet(t) / (2.0 * BOLTZMANN * t) + 1.115_087_7 / (BOLTZMANN * (REFTEMP + REFTEMP));
+    -2.0 * vt_at(t) * (1.5 * (t / REFTEMP).ln() + CHARGE * arg)
+}
+
+/// Junction potential and zero-bias capacitance at `temp`, given their
+/// values `pb`, `cj` at `tnom` and the grading coefficient `m` (SPICE3).
+pub fn junction_temp(pb: f64, cj: f64, m: f64, tnom: f64, temp: f64) -> (f64, f64) {
+    let (pbo, tpb) = junction_potential_temp(pb, tnom, temp);
+    let gmaold = (pb - pbo) / pbo;
+    let gmanew = (tpb - pbo) / pbo;
+    let c = cj / (1.0 + m * (4e-4 * (tnom - REFTEMP) - gmaold)) * (1.0 + m * (4e-4 * (temp - REFTEMP) - gmanew));
+    (tpb, c)
+}
+
+/// The 0 K-referred potential `pbo` and the potential at `temp`.
+pub fn junction_potential_temp(pb: f64, tnom: f64, temp: f64) -> (f64, f64) {
+    let pbo = (pb - pbfact(tnom)) / (tnom / REFTEMP);
+    (pbo, pbfact(temp) + temp / REFTEMP * pbo)
+}
+
 /// Critical voltage of a junction: where the exponential's curvature makes
 /// limiting worthwhile.
 pub fn vcrit(vt: f64, is: f64) -> f64 {
@@ -131,6 +166,16 @@ pub fn depletion(v: f64, cj0: f64, vj: f64, m: f64, fc: f64) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temperature_scaling_is_identity_at_tnom() {
+        let (pb, cj) = junction_temp(0.75, 1e-12, 0.33, REFTEMP, REFTEMP);
+        assert!((pb - 0.75).abs() < 1e-12 && (cj - 1e-12).abs() < 1e-24);
+        // A junction potential falls by roughly 2 mV/K.
+        let (pb_hot, _) = junction_temp(0.75, 1e-12, 0.33, REFTEMP, REFTEMP + 50.0);
+        let slope = (pb_hot - 0.75) / 50.0;
+        assert!(slope < -1.0e-3 && slope > -3.0e-3, "{slope}");
+    }
 
     #[test]
     fn thermal_voltage_at_27c() {

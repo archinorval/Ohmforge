@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 
+use faer::c64;
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
 use faer::sparse::{SparseColMatRef, SymbolicSparseColMatRef};
@@ -173,6 +174,45 @@ impl SparseSystem {
         } else {
             0.0
         }
+    }
+
+    /// Assembled values in CSC order (same pattern for every assembly).
+    pub fn values(&self) -> &[f64] {
+        &self.values
+    }
+
+    /// Solve the complex system `(G + jωC) x = b` in place, where `g` and
+    /// `c` are value arrays from [`SparseSystem::values`] on this pattern.
+    /// `re`/`im` use variable numbering (index 0 is ground).
+    pub fn solve_complex(
+        &self,
+        g: &[f64],
+        c: &[f64],
+        omega: f64,
+        re: &mut [f64],
+        im: &mut [f64],
+    ) -> Result<(), LinearError> {
+        let n = self.n;
+        re[0] = 0.0;
+        im[0] = 0.0;
+        if n == 0 {
+            return Ok(());
+        }
+        let symbolic = self.symbolic.clone().ok_or(LinearError::Singular(None))?;
+        let vals: Vec<c64> = g.iter().zip(c).map(|(&g, &c)| c64::new(g, omega * c)).collect();
+        let sym = SymbolicSparseColMatRef::new_checked(n, n, &self.col_ptr, None, &self.row_idx);
+        let lu = Lu::<usize, c64>::try_new_with_symbolic(symbolic, SparseColMatRef::new(sym, &vals))
+            .map_err(|_| LinearError::Singular(None))?;
+        let mut b: Vec<c64> = (1..=n).map(|i| c64::new(re[i], im[i])).collect();
+        lu.solve_in_place(faer::MatMut::from_column_major_slice_mut(&mut b, n, 1));
+        for (i, v) in b.iter().enumerate() {
+            if !(v.re.is_finite() && v.im.is_finite()) {
+                return Err(LinearError::Singular(Some(i + 1)));
+            }
+            re[i + 1] = v.re;
+            im[i + 1] = v.im;
+        }
+        Ok(())
     }
 
     /// Dense copy (row-major), for tests and diagnostics.

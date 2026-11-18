@@ -55,6 +55,8 @@ pub struct VoltageSource {
     n: Var,
     /// Value.
     pub value: SourceValue,
+    /// Small-signal magnitude and phase (degrees) for `.ac`.
+    pub ac: Option<(f64, f64)>,
     b: Var,
     s: [Slot; 4],
 }
@@ -67,9 +69,16 @@ impl VoltageSource {
             p,
             n,
             value,
+            ac: None,
             b: 0,
             s: [Slot::NONE; 4],
         }
+    }
+
+    /// Set the `.ac` excitation (magnitude, phase in degrees).
+    pub fn with_ac(mut self, ac: Option<(f64, f64)>) -> Self {
+        self.ac = ac;
+        self
     }
 }
 
@@ -107,6 +116,13 @@ impl Device for VoltageSource {
         self.value.dc = Some(value);
         true
     }
+    fn ac_stimulus(&self, re: &mut [f64], im: &mut [f64]) {
+        if let Some((mag, ph)) = self.ac {
+            let (s, c) = ph.to_radians().sin_cos();
+            re[self.b] += mag * c;
+            im[self.b] += mag * s;
+        }
+    }
 }
 
 /// Independent current source: positive current flows from `p` through
@@ -118,6 +134,8 @@ pub struct CurrentSource {
     n: Var,
     /// Value.
     pub value: SourceValue,
+    /// Small-signal magnitude and phase (degrees) for `.ac`.
+    pub ac: Option<(f64, f64)>,
 }
 
 impl CurrentSource {
@@ -128,7 +146,14 @@ impl CurrentSource {
             p,
             n,
             value,
+            ac: None,
         }
+    }
+
+    /// Set the `.ac` excitation (magnitude, phase in degrees).
+    pub fn with_ac(mut self, ac: Option<(f64, f64)>) -> Self {
+        self.ac = ac;
+        self
     }
 }
 
@@ -147,6 +172,15 @@ impl Device for CurrentSource {
     fn set_dc(&mut self, value: f64) -> bool {
         self.value.dc = Some(value);
         true
+    }
+    fn ac_stimulus(&self, re: &mut [f64], im: &mut [f64]) {
+        if let Some((mag, ph)) = self.ac {
+            let (s, c) = ph.to_radians().sin_cos();
+            re[self.p] -= mag * c;
+            im[self.p] -= mag * s;
+            re[self.n] += mag * c;
+            im[self.n] += mag * s;
+        }
     }
 }
 

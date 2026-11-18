@@ -87,6 +87,17 @@ impl Setup<'_> {
         self.vars.len() - 1
     }
 
+    /// A device-internal branch current named `i(device#suffix)`, hidden
+    /// from default output (e.g. a capacitor's ESL).
+    pub fn internal_branch(&mut self, device: &str, suffix: &str) -> Var {
+        self.vars.push(VarInfo {
+            name: format!("i({device}#{suffix})"),
+            kind: VarKind::Current,
+            internal: true,
+        });
+        self.vars.len() - 1
+    }
+
     /// Branch current of another device (for F/H sources); available once
     /// branch-owning devices are set up.
     pub fn branch_of(&self, device: &str) -> Option<Var> {
@@ -139,6 +150,9 @@ pub struct LoadCtx<'a> {
     /// Set by a device when it limited a junction voltage this iteration
     /// (the iteration cannot count as converged).
     pub limited: bool,
+    /// Linearising about a converged operating point for `.ac`: devices
+    /// must not limit voltages or advance internal state.
+    pub small_signal: bool,
 }
 
 impl LoadCtx<'_> {
@@ -200,6 +214,7 @@ pub(crate) struct LoadParams {
     pub time: f64,
     pub tran: TranSpec,
     pub tran_op: bool,
+    pub small_signal: bool,
 }
 
 /// A circuit element that stamps into the MNA system.
@@ -242,6 +257,14 @@ pub trait Device: std::fmt::Debug + Send {
 
     /// Apply `uic` initial conditions to the starting solution.
     fn initial_condition(&self, _x: &mut [f64]) {}
+
+    /// Add this device's small-signal (`.ac`) excitation to the complex
+    /// right-hand side (`re`, `im`, indexed by variable; row 0 is ground).
+    fn ac_stimulus(&self, _re: &mut [f64], _im: &mut [f64]) {}
+
+    /// Derived outputs at solution `x`, e.g. an LED's optical power, as
+    /// `(name, value)` pairs such as `("popt(d1)", 1e-3)`.
+    fn probes(&self, _x: &[f64], _out: &mut Vec<(String, f64)>) {}
 }
 
 /// Build errors.
@@ -410,6 +433,7 @@ impl Circuit {
             integ,
             states,
             limited: false,
+            small_signal: p.small_signal,
         };
         for d in self.devices.iter_mut() {
             d.load(&mut cx);

@@ -4,9 +4,11 @@
 //! ohmforge run <netlist.cir> [--out results.csv] [--vcd waves.vcd]
 //! ```
 //!
-//! Runs every analysis in a SPICE netlist (`.op`, `.dc`, `.tran`). Operating
-//! points are printed as a table; sweeps and transients are written as CSV to
-//! `--out` (or standard output) and optionally as a VCD file.
+//! Runs every analysis in a SPICE netlist (`.op`, `.dc` including nested
+//! sweeps, `.ac`, `.tran`). Operating points are printed as a table; sweeps
+//! and transients are written as CSV to `--out` (or standard output) and
+//! optionally as a VCD file; `.ac` results are written as CSV with
+//! magnitude and phase (degrees) columns.
 
 use std::fs::File;
 use std::io::{self, BufWriter, Write};
@@ -67,7 +69,7 @@ fn run(args: &RunArgs) -> Result<(), String> {
         eprintln!("warning: {w}");
     }
     if built.analyses.is_empty() {
-        return Err("the netlist has no analysis (.op, .dc or .tran)".into());
+        return Err("the netlist has no analysis (.op, .dc, .ac or .tran)".into());
     }
     eprintln!("{}: {} unknowns", deck.title, built.circuit.unknowns());
     let mut written = 0;
@@ -87,8 +89,42 @@ fn run(args: &RunArgs) -> Result<(), String> {
                 start,
                 stop,
                 step,
-            } => analysis::dc_sweep(&mut built.circuit, &opts, source, *start, *stop, *step)
-                .map_err(|e| e.to_string())?,
+                outer,
+            } => {
+                let inner = analysis::DcAxis {
+                    source: source.clone(),
+                    start: *start,
+                    stop: *stop,
+                    step: *step,
+                };
+                let outer = outer.as_ref().map(|o| analysis::DcAxis {
+                    source: o.source.clone(),
+                    start: o.start,
+                    stop: o.stop,
+                    step: o.step,
+                });
+                analysis::dc_sweep_nested(&mut built.circuit, &opts, &inner, outer.as_ref())
+                    .map_err(|e| e.to_string())?
+            }
+            Analysis::Ac { .. } => {
+                let freqs = netlist::Built::ac_frequencies(&a).expect("ac");
+                let ac = analysis::ac_analysis(&mut built.circuit, &opts, &freqs).map_err(|e| e.to_string())?;
+                let io = |e: io::Error| e.to_string();
+                match &args.out {
+                    Some(p) => {
+                        let p = numbered(p, written);
+                        let mut f = BufWriter::new(File::create(&p).map_err(|e| format!("{}: {e}", p.display()))?);
+                        ac.write_csv(&mut f).and_then(|()| f.flush()).map_err(io)?;
+                        eprintln!("wrote {}", p.display());
+                    }
+                    None => ac.write_csv(&mut io::stdout().lock()).map_err(io)?,
+                }
+                if args.vcd.is_some() {
+                    eprintln!("note: no VCD output for .ac (frequency-domain data)");
+                }
+                written += 1;
+                continue;
+            }
             Analysis::Tran { .. } => {
                 let req = built.tran_request(&a).expect("tran");
                 let w = analysis::transient(&mut built.circuit, &opts, &req).map_err(|e| e.to_string())?;

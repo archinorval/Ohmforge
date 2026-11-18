@@ -4,7 +4,10 @@
 //! produced by running ngspice as an external program
 //! (`scripts/gen-ngspice-golden.sh`; see `tests/golden/README.md`). Every
 //! compared signal must agree within 1 % of the reference signal's span
-//! (or of its magnitude for operating points).
+//! (or of its magnitude for operating points). AC magnitudes (`vm(...)`)
+//! are compared point by point relative to the reference magnitude (with
+//! a floor of 1e-3 of the largest), and AC phases (`vp(...)`, degrees) as
+//! a percentage of 180°. Nested DC sweeps are compared row by row.
 //!
 //! Run with `cargo test -p of-analog --test ngspice_compare -- --nocapture`
 //! to print the comparison table.
@@ -52,21 +55,73 @@ fn compare(name: &str) -> Vec<(String, String, f64)> {
                 out.push((name.to_owned(), format!("{sig} (op)"), err));
             }
         }
+        a @ Analysis::Ac { .. } => {
+            let freqs = netlist::Built::ac_frequencies(&a).unwrap();
+            let ac = analysis::ac_analysis(&mut b.circuit, &b.options, &freqs).expect("ac");
+            assert_eq!(ac.freq.len(), golden.rows.len(), "{name}: frequency count");
+            for (j, sig) in golden.names.iter().enumerate() {
+                let refs: Vec<f64> = golden.rows.iter().map(|r| r[j + 1]).collect();
+                let inner = &format!("v({})", &sig[3..sig.len() - 1]);
+                let err = if sig.starts_with("vm(") {
+                    let mine = ac.mag(inner).unwrap_or_else(|| panic!("{name}: no {inner}"));
+                    let floor = refs.iter().copied().fold(0.0, f64::max) * 1e-3;
+                    mine.iter()
+                        .zip(&refs)
+                        .map(|(m, r)| 100.0 * (m - r).abs() / r.abs().max(floor).max(1e-30))
+                        .fold(0.0, f64::max)
+                } else {
+                    let mine = ac.phase_deg(inner).unwrap_or_else(|| panic!("{name}: no {inner}"));
+                    mine.iter()
+                        .zip(&refs)
+                        .map(|(m, r)| {
+                            let d = (m - r).rem_euclid(360.0);
+                            100.0 * d.min(360.0 - d) / 180.0
+                        })
+                        .fold(0.0, f64::max)
+                };
+                out.push((name.to_owned(), format!("{sig} (ac)"), err));
+            }
+        }
         a => {
-            let w = match a {
+            let (w, nested) = match a {
                 Analysis::Dc {
                     source,
                     start,
                     stop,
                     step,
-                } => analysis::dc_sweep(&mut b.circuit, &b.options, &source, start, stop, step).expect("dc"),
+                    outer,
+                } => {
+                    let inner = analysis::DcAxis {
+                        source,
+                        start,
+                        stop,
+                        step,
+                    };
+                    let outer = outer.map(|o| analysis::DcAxis {
+                        source: o.source,
+                        start: o.start,
+                        stop: o.stop,
+                        step: o.step,
+                    });
+                    let nested = outer.is_some();
+                    (
+                        analysis::dc_sweep_nested(&mut b.circuit, &b.options, &inner, outer.as_ref()).expect("dc"),
+                        nested,
+                    )
+                }
                 Analysis::Tran { .. } => {
                     let req = b.tran_request(&a).unwrap();
-                    analysis::transient(&mut b.circuit, &b.options, &req).expect("tran")
+                    (
+                        analysis::transient(&mut b.circuit, &b.options, &req).expect("tran"),
+                        false,
+                    )
                 }
-                Analysis::Op => unreachable!(),
+                Analysis::Op | Analysis::Ac { .. } => unreachable!(),
             };
             let kind = if w.x_name == "time" { "tran" } else { "dc" };
+            if nested {
+                assert_eq!(w.x.len(), golden.rows.len(), "{name}: nested sweep length");
+            }
             for (j, sig) in golden.names.iter().enumerate() {
                 let mine = w.signal(sig).unwrap_or_else(|| panic!("{name}: no {sig}"));
                 let refs: Vec<f64> = golden.rows.iter().map(|r| r[j + 1]).collect();
@@ -79,7 +134,11 @@ fn compare(name: &str) -> Vec<(String, String, f64)> {
                     .rows
                     .iter()
                     .zip(&refs)
-                    .map(|(r, &y)| (interpolate(&w.x, mine, r[0]) - y).abs())
+                    .enumerate()
+                    .map(|(k, (r, &y))| {
+                        let m = if nested { mine[k] } else { interpolate(&w.x, mine, r[0]) };
+                        (m - y).abs()
+                    })
                     .fold(0.0, f64::max);
                 out.push((name.to_owned(), format!("{sig} ({kind})"), 100.0 * err / span));
             }

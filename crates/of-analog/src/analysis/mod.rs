@@ -1,10 +1,13 @@
-//! Analyses: DC operating point, DC sweep and transient.
+//! Analyses: DC operating point, DC sweeps (single and nested), small-signal
+//! AC and transient.
 
+mod ac;
 mod dc;
 mod newton;
 mod tran;
 
-pub use dc::{OpMethod, dc_sweep, operating_point};
+pub use ac::ac_analysis;
+pub use dc::{DcAxis, OpMethod, dc_sweep, dc_sweep_nested, operating_point};
 pub use tran::{TranRequest, transient};
 
 use crate::integrate::Method;

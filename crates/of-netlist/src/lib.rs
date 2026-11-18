@@ -5,6 +5,7 @@
 //! nets into digital-only nets (event-driven kernel) and mixed nets
 //! (promoted to the MNA analog solver).
 
+pub mod expr;
 pub mod spice;
 
 /// Index of a net. Net 0 is ground.

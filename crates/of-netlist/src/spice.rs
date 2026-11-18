@@ -1,9 +1,11 @@
 //! SPICE netlist subset parser.
 //!
 //! Reads the ngspice-compatible subset Ohmforge uses for tests, imports and
-//! the `ohmforge run` command: element cards (R C L V I D Q M E G F H X),
-//! `.model`, `.subckt`/`.ends` (flattened on parse), `.param` constants,
-//! `.op`, `.dc`, `.tran`, `.ic`, `.options`, `.include` and `.end`.
+//! the `ohmforge run` command: element cards (R C L K V I D Q M E G F H S W
+//! X), `.model`, `.subckt`/`.ends` (flattened on parse, with `params:` and
+//! subcircuit-local `.param`/`.model`), `.param` expressions (see
+//! [`crate::expr`]), `.op`, `.dc` (one or two sources), `.ac`, `.tran`,
+//! `.temp`, `.ic`, `.options`, `.include` and `.end`.
 //! `.control` blocks and output directives (`.print`, `.save`, ...) are
 //! skipped so the same file runs unchanged in ngspice.
 //!
@@ -133,8 +135,10 @@ pub struct Waveform {
 pub struct SourceSpec {
     /// DC value (`DC 5` or a bare number).
     pub dc: Option<f64>,
-    /// AC magnitude (parsed, not yet used).
+    /// AC magnitude for `.ac` (`AC mag [phase]`).
     pub ac: Option<f64>,
+    /// AC phase in degrees.
+    pub ac_phase: f64,
     /// Transient waveform.
     pub wave: Option<Waveform>,
 }
@@ -150,8 +154,10 @@ pub struct Element {
     pub value: Option<f64>,
     /// Model name for D, Q and M elements.
     pub model: Option<String>,
-    /// Controlling voltage source for F and H elements.
+    /// Controlling voltage source for F, H and W elements.
     pub control: Option<String>,
+    /// Referenced elements: the two inductors of a K coupling.
+    pub refs: Vec<String>,
     /// `key=value` instance parameters (`ic`, `w`, `l`, `area`, `m`, ...).
     pub params: BTreeMap<String, f64>,
     /// Flags such as `off`.
@@ -165,7 +171,13 @@ pub struct Element {
 impl Element {
     /// The element type letter (`r`, `c`, `q`, ...).
     pub fn letter(&self) -> char {
-        self.name.chars().next().unwrap_or('?')
+        // Flattened subcircuit elements are named `x1.r1`: the type letter
+        // is the first character of the last path segment.
+        self.name
+            .rsplit('.')
+            .next()
+            .and_then(|s| s.chars().next())
+            .unwrap_or('?')
     }
 }
 
@@ -187,9 +199,9 @@ pub struct Model {
 pub enum Analysis {
     /// `.op`
     Op,
-    /// `.dc src start stop step`
+    /// `.dc src start stop step [src2 start2 stop2 step2]`
     Dc {
-        /// Swept source name.
+        /// Swept source name (inner loop).
         source: String,
         /// First value.
         start: f64,
@@ -197,6 +209,19 @@ pub enum Analysis {
         stop: f64,
         /// Increment.
         step: f64,
+        /// Optional outer sweep (`src2 start2 stop2 step2`).
+        outer: Option<DcSweep>,
+    },
+    /// `.ac dec|oct|lin points fstart fstop`
+    Ac {
+        /// Point spacing.
+        sweep: AcSweep,
+        /// Points per decade/octave, or total points for `lin`.
+        points: usize,
+        /// First frequency (Hz).
+        fstart: f64,
+        /// Last frequency (Hz).
+        fstop: f64,
     },
     /// `.tran tstep tstop [tstart [tmax]] [uic]`
     Tran {
@@ -211,6 +236,61 @@ pub enum Analysis {
         /// Skip the operating point and start from initial conditions.
         uic: bool,
     },
+}
+
+/// The outer source of a nested `.dc` sweep.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DcSweep {
+    /// Source name.
+    pub source: String,
+    /// First value.
+    pub start: f64,
+    /// Last value.
+    pub stop: f64,
+    /// Increment.
+    pub step: f64,
+}
+
+/// Frequency spacing of an `.ac` sweep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcSweep {
+    /// `dec`: points per decade.
+    Dec,
+    /// `oct`: points per octave.
+    Oct,
+    /// `lin`: total points, linearly spaced.
+    Lin,
+}
+
+impl AcSweep {
+    /// The frequencies of a sweep (SPICE semantics: logarithmic sweeps step
+    /// by a constant ratio from `fstart` and stop at `fstop` within a small
+    /// tolerance).
+    pub fn frequencies(self, points: usize, fstart: f64, fstop: f64) -> Vec<f64> {
+        let points = points.max(1);
+        match self {
+            AcSweep::Lin => {
+                if points == 1 {
+                    return vec![fstart];
+                }
+                let step = (fstop - fstart) / (points - 1) as f64;
+                (0..points).map(|k| fstart + step * k as f64).collect()
+            }
+            AcSweep::Dec | AcSweep::Oct => {
+                let base: f64 = if self == AcSweep::Dec { 10.0 } else { 2.0 };
+                let ratio = base.powf(1.0 / points as f64);
+                let mut out = Vec::new();
+                let mut f = fstart;
+                let mut k = 0i32;
+                while f <= fstop * (1.0 + 1e-9) && out.len() < 1_000_000 {
+                    out.push(f);
+                    k += 1;
+                    f = fstart * ratio.powi(k);
+                }
+                out
+            }
+        }
+    }
 }
 
 /// A parsed, flattened netlist.
@@ -229,6 +309,10 @@ pub struct Deck {
     pub options: BTreeMap<String, f64>,
     /// `.ic v(node)=value` initial conditions.
     pub initial_conditions: BTreeMap<String, f64>,
+    /// Circuit temperature from `.temp` (°C), if given.
+    pub temp: Option<f64>,
+    /// Global parameters after evaluating every `.param`.
+    pub params: BTreeMap<String, f64>,
     /// Non-fatal notes about ignored cards.
     pub warnings: Vec<String>,
 }
@@ -237,12 +321,108 @@ pub struct Deck {
 struct Card {
     line: usize,
     tokens: Vec<String>,
+    /// The logical line as written (for expressions).
+    raw: String,
 }
 
 #[derive(Debug, Clone)]
 struct Subckt {
     ports: Vec<String>,
+    /// Default parameters (`params:` on the `.subckt` line), unevaluated.
+    defaults: Vec<(String, String)>,
     body: Vec<Card>,
+}
+
+/// Parameters and model names visible while expanding one (sub)circuit.
+#[derive(Debug, Clone, Default)]
+struct Scope {
+    params: BTreeMap<String, f64>,
+    /// Local model name to the flattened global name.
+    models: BTreeMap<String, String>,
+}
+
+/// Find `name = value` assignments in `text` (values may be bare
+/// expressions with spaces, `{...}` or `'...'`). Returns the byte offset of
+/// the first assignment and the pairs.
+fn assignments(text: &str) -> (usize, Vec<(String, String)>) {
+    let b = text.as_bytes();
+    // Positions of `ident =` at bracket depth 0 (not ==, <=, >=, !=).
+    let mut marks: Vec<(usize, usize, String)> = Vec::new(); // (ident start, value start, name)
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'(' | b'{' | b'[' => depth += 1,
+            b')' | b'}' | b']' => depth -= 1,
+            b'\'' => {
+                // Skip quoted expressions.
+                i += 1;
+                while i < b.len() && b[i] != b'\'' {
+                    i += 1;
+                }
+            }
+            b'=' if depth == 0
+                && b.get(i + 1) != Some(&b'=')
+                && !matches!(i.checked_sub(1).map(|k| b[k]), Some(b'=' | b'<' | b'>' | b'!')) =>
+            {
+                let mut j = i;
+                while j > 0 && b[j - 1].is_ascii_whitespace() {
+                    j -= 1;
+                }
+                let end = j;
+                while j > 0 && (b[j - 1].is_ascii_alphanumeric() || b[j - 1] == b'_') {
+                    j -= 1;
+                }
+                if j < end {
+                    marks.push((j, i + 1, text[j..end].to_ascii_lowercase()));
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    let first = marks.first().map_or(text.len(), |m| m.0);
+    let mut out = Vec::new();
+    for (k, (_, vstart, name)) in marks.iter().enumerate() {
+        let vend = marks.get(k + 1).map_or(text.len(), |m| m.0);
+        let v = text[*vstart..vend].trim().trim_end_matches(',').trim();
+        out.push((name.clone(), v.to_string()));
+    }
+    (first, out)
+}
+
+/// Evaluate a parameter value: `{expr}`, `'expr'` or a bare expression.
+fn eval_value(v: &str, params: &BTreeMap<String, f64>, line: usize) -> Result<f64, ParseError> {
+    let v = v.trim();
+    let inner = v
+        .strip_prefix('{')
+        .and_then(|t| t.strip_suffix('}'))
+        .or_else(|| v.strip_prefix('\'').and_then(|t| t.strip_suffix('\'')))
+        .unwrap_or(v);
+    crate::expr::eval(inner, params).map_err(|message| ParseError { line, message })
+}
+
+/// Text after the first `n` whitespace-separated words of `raw`.
+fn after_words(raw: &str, n: usize) -> &str {
+    let mut rest = raw.trim_start();
+    for _ in 0..n {
+        rest = rest.trim_start();
+        let cut = rest.find(char::is_whitespace).unwrap_or(rest.len());
+        rest = &rest[cut..];
+    }
+    rest
+}
+
+/// Split the `.subckt`/`X` parameter part off a card: returns the tokens
+/// before it and the assignments.
+fn split_params(card: &Card) -> (Vec<String>, Vec<(String, String)>) {
+    let lower = card.raw.to_ascii_lowercase();
+    if let Some(at) = lower.find("params:") {
+        let (_, pairs) = assignments(&card.raw[at + 7..]);
+        return (tokenize(&card.raw[..at]), pairs);
+    }
+    let (first, pairs) = assignments(&card.raw);
+    (tokenize(&card.raw[..first]), pairs)
 }
 
 /// Split a logical line into tokens: whitespace and commas separate,
@@ -387,7 +567,11 @@ fn read_cards(
         }
         let tokens = tokenize(&body);
         if !tokens.is_empty() {
-            cards.push(Card { line, tokens });
+            cards.push(Card {
+                line,
+                tokens,
+                raw: body.trim().to_string(),
+            });
         }
     }
     Ok((title, cards))
@@ -400,8 +584,7 @@ fn parse_with_base(text: &str, base: Option<PathBuf>) -> Result<Deck, ParseError
         ..Deck::default()
     };
 
-    // Pass 1: parameters, models and subcircuit definitions.
-    let mut params: BTreeMap<String, f64> = BTreeMap::new();
+    // Pass 1: split out subcircuit definitions.
     let mut subckts: BTreeMap<String, Subckt> = BTreeMap::new();
     let mut top: Vec<Card> = Vec::new();
     let mut open: Option<(String, Subckt)> = None;
@@ -411,19 +594,17 @@ fn parse_with_base(text: &str, base: Option<PathBuf>) -> Result<Deck, ParseError
             if open.is_some() {
                 return err(card.line, "nested .subckt definitions are not supported");
             }
-            let name = card.tokens.get(1).cloned().ok_or(ParseError {
+            let (toks, defaults) = split_params(&card);
+            let name = toks.get(1).cloned().ok_or(ParseError {
                 line: card.line,
                 message: ".subckt needs a name".into(),
             })?;
-            let ports = card.tokens[2..]
-                .iter()
-                .take_while(|t| *t != "params:" && *t != "=")
-                .cloned()
-                .collect();
+            let ports = toks[2..].to_vec();
             open = Some((
                 name,
                 Subckt {
                     ports,
+                    defaults,
                     body: Vec::new(),
                 },
             ));
@@ -433,19 +614,6 @@ fn parse_with_base(text: &str, base: Option<PathBuf>) -> Result<Deck, ParseError
                 message: ".ends without .subckt".into(),
             })?;
             subckts.insert(name, sub);
-        } else if head == ".model" {
-            let m = parse_model(&card, &params)?;
-            deck.models.insert(m.name.clone(), m);
-        } else if head == ".param" {
-            let mut i = 1;
-            while i < card.tokens.len() {
-                if card.tokens.get(i + 1).map(String::as_str) != Some("=") || i + 2 >= card.tokens.len() {
-                    return err(card.line, "expected name=value in .param");
-                }
-                let v = value_of(&card.tokens[i + 2], &params, card.line)?;
-                params.insert(card.tokens[i].clone(), v);
-                i += 3;
-            }
         } else if let Some((_, sub)) = open.as_mut() {
             sub.body.push(card);
         } else {
@@ -456,30 +624,51 @@ fn parse_with_base(text: &str, base: Option<PathBuf>) -> Result<Deck, ParseError
         return err(0, "missing .ends");
     }
 
-    // Pass 2: elements (flattening subcircuits) and directives.
+    // Pass 2: parameters (in order), then models, then elements and
+    // directives.
+    let mut scope = Scope::default();
+    for card in top.iter().filter(|c| c.tokens[0] == ".param") {
+        eval_params(card, &mut scope.params)?;
+    }
+    for card in top.iter().filter(|c| c.tokens[0] == ".model") {
+        let m = parse_model(card, &scope.params)?;
+        deck.models.insert(m.name.clone(), m);
+    }
     for card in &top {
         let head = card.tokens[0].as_str();
+        if head == ".param" || head == ".model" {
+            continue;
+        }
         if head.starts_with('.') {
-            parse_directive(card, &params, &mut deck)?;
+            parse_directive(card, &scope.params, &mut deck)?;
         } else {
-            expand_element(card, "", &BTreeMap::new(), &subckts, &params, &mut deck, 0)?;
+            expand_element(card, "", &BTreeMap::new(), &subckts, &scope, &mut deck, 0)?;
         }
     }
+    deck.params = scope.params;
     Ok(deck)
 }
 
+/// Evaluate a `.param` card into `params` (left to right, so later
+/// assignments may use earlier ones).
+fn eval_params(card: &Card, params: &mut BTreeMap<String, f64>) -> Result<(), ParseError> {
+    let (_, pairs) = assignments(after_words(&card.raw, 1));
+    if pairs.is_empty() {
+        return err(card.line, "expected name=value in .param");
+    }
+    for (name, v) in pairs {
+        if v.is_empty() {
+            return err(card.line, format!("missing value for parameter '{name}'"));
+        }
+        let x = eval_value(&v, params, card.line)?;
+        params.insert(name, x);
+    }
+    Ok(())
+}
+
 fn value_of(token: &str, params: &BTreeMap<String, f64>, line: usize) -> Result<f64, ParseError> {
-    if let Some(inner) = token.strip_prefix('{').and_then(|t| t.strip_suffix('}')) {
-        let key = inner.trim().to_ascii_lowercase();
-        return params.get(&key).copied().map_or_else(
-            || {
-                err(
-                    line,
-                    format!("unknown parameter {{{key}}} (expressions are not supported yet)"),
-                )
-            },
-            Ok,
-        );
+    if token.starts_with('{') || token.starts_with('\'') {
+        return eval_value(token, params, line);
     }
     if let Some(v) = parse_value(token) {
         return Ok(v);
@@ -548,19 +737,50 @@ fn parse_directive(card: &Card, params: &BTreeMap<String, f64>, deck: &mut Deck)
     match t[0].as_str() {
         ".op" => deck.analyses.push(Analysis::Op),
         ".dc" => {
-            if t.len() > 5 {
-                deck.warnings.push(format!(
-                    "line {line}: nested .dc sweeps are not supported; only the first source is swept"
-                ));
-            }
-            deck.analyses.push(Analysis::Dc {
-                source: t.get(1).cloned().ok_or(ParseError {
+            let src = |i: usize| -> Result<String, ParseError> {
+                t.get(i).cloned().ok_or(ParseError {
                     line,
                     message: ".dc needs a source".into(),
-                })?,
+                })
+            };
+            let outer = if t.len() > 5 {
+                Some(DcSweep {
+                    source: src(5)?,
+                    start: num(6)?,
+                    stop: num(7)?,
+                    step: num(8)?,
+                })
+            } else {
+                None
+            };
+            deck.analyses.push(Analysis::Dc {
+                source: src(1)?,
                 start: num(2)?,
                 stop: num(3)?,
                 step: num(4)?,
+                outer,
+            });
+        }
+        ".ac" => {
+            let sweep = match t.get(1).map(String::as_str) {
+                Some("dec") => AcSweep::Dec,
+                Some("oct") => AcSweep::Oct,
+                Some("lin") => AcSweep::Lin,
+                _ => return err(line, ".ac needs dec, oct or lin"),
+            };
+            let points = num(2)?;
+            if points.is_nan() || points < 1.0 {
+                return err(line, ".ac needs at least one point");
+            }
+            let (fstart, fstop) = (num(3)?, num(4)?);
+            if (sweep != AcSweep::Lin && (fstart.is_nan() || fstart <= 0.0)) || fstop.is_nan() || fstop < fstart {
+                return err(line, ".ac needs 0 < fstart <= fstop");
+            }
+            deck.analyses.push(Analysis::Ac {
+                sweep,
+                points: points.round() as usize,
+                fstart,
+                fstop,
             });
         }
         ".tran" => {
@@ -622,10 +842,14 @@ fn parse_directive(card: &Card, params: &BTreeMap<String, f64>, deck: &mut Deck)
             }
         }
         ".print" | ".plot" | ".probe" | ".save" | ".meas" | ".measure" | ".width" | ".title" => {}
-        ".temp" => deck
-            .warnings
-            .push(format!("line {line}: .temp ignored; simulations run at 27 °C")),
-        ".ac" | ".noise" | ".tf" | ".sens" | ".pz" | ".four" | ".disto" => {
+        ".temp" => {
+            deck.temp = Some(num(1)?);
+            if t.len() > 2 {
+                deck.warnings
+                    .push(format!("line {line}: only the first .temp value is used"));
+            }
+        }
+        ".noise" | ".tf" | ".sens" | ".pz" | ".four" | ".disto" => {
             deck.warnings
                 .push(format!("line {line}: {} analysis is not supported yet", t[0]));
         }
@@ -679,11 +903,21 @@ fn parse_source(tokens: &[String], params: &BTreeMap<String, f64>, line: usize) 
                 i += 2;
             }
             "ac" => {
-                let mag = tokens.get(i + 1).and_then(|t| parse_value(t));
+                let num_at = |k: usize| -> Option<f64> {
+                    let tok = tokens.get(k)?;
+                    if parse_value(tok).is_some() || tok.starts_with('{') {
+                        value_of(tok, params, line).ok()
+                    } else {
+                        None
+                    }
+                };
+                let mag = num_at(i + 1);
                 spec.ac = Some(mag.unwrap_or(1.0));
                 i += if mag.is_some() { 2 } else { 1 };
-                // Optional phase.
-                if mag.is_some() && tokens.get(i).and_then(|t| parse_value(t)).is_some() {
+                if mag.is_some()
+                    && let Some(ph) = num_at(i)
+                {
+                    spec.ac_phase = ph;
                     i += 1;
                 }
             }
@@ -706,12 +940,13 @@ fn expand_element(
     prefix: &str,
     port_map: &BTreeMap<String, String>,
     subckts: &BTreeMap<String, Subckt>,
-    params: &BTreeMap<String, f64>,
+    scope: &Scope,
     deck: &mut Deck,
     depth: usize,
 ) -> Result<(), ParseError> {
     let t = &card.tokens;
     let line = card.line;
+    let params = &scope.params;
     let name = if prefix.is_empty() {
         t[0].clone()
     } else {
@@ -728,6 +963,16 @@ fn expand_element(
             format!("{prefix}.{n}")
         }
     };
+    // Element names referenced from inside a subcircuit are local to it.
+    let map_ref = |n: &str| -> String {
+        if prefix.is_empty() {
+            n.to_string()
+        } else {
+            format!("{prefix}.{n}")
+        }
+    };
+    let model_name = |n: &str| -> String { scope.models.get(n).cloned().unwrap_or_else(|| n.to_string()) };
+    let known_model = |n: &str| scope.models.contains_key(n) || deck.models.contains_key(n);
     let letter = t[0].chars().next().unwrap_or('?');
     let need = |k: usize| -> Result<(), ParseError> {
         if t.len() < k + 1 {
@@ -742,6 +987,7 @@ fn expand_element(
         value: None,
         model: None,
         control: None,
+        refs: Vec::new(),
         params: BTreeMap::new(),
         flags: Vec::new(),
         source: None,
@@ -773,6 +1019,11 @@ fn expand_element(
                 return err(line, format!("{} has no value", t[0]));
             }
         }
+        'k' => {
+            need(3)?;
+            e.refs = vec![map_ref(&t[1]), map_ref(&t[2])];
+            e.value = Some(value_of(&t[3], params, line)?);
+        }
         'v' | 'i' => {
             need(2)?;
             e.nodes = vec![map_node(&t[1]), map_node(&t[2])];
@@ -781,30 +1032,39 @@ fn expand_element(
         'd' => {
             need(3)?;
             e.nodes = vec![map_node(&t[1]), map_node(&t[2])];
-            e.model = Some(t[3].clone());
+            e.model = Some(model_name(&t[3]));
             instance_rest(&t[4..], "area", params, line, &mut e)?;
         }
         'q' => {
             need(4)?;
             // Optional substrate node: the model name is the first token that
             // names a known model.
-            let model_at = if deck.models.contains_key(&t[4]) || t.len() < 6 {
-                4
-            } else {
-                5
-            };
-            if !deck.models.contains_key(&t[model_at]) && deck.models.contains_key(&t[4]) {
+            let model_at = if known_model(&t[4]) || t.len() < 6 { 4 } else { 5 };
+            if !known_model(&t[model_at]) && known_model(&t[4]) {
                 return err(line, format!("unknown model for {}", t[0]));
             }
             e.nodes = t[1..model_at].iter().map(|n| map_node(n)).collect();
-            e.model = Some(t[model_at].clone());
+            e.model = Some(model_name(&t[model_at]));
             instance_rest(&t[model_at + 1..], "area", params, line, &mut e)?;
         }
         'm' => {
             need(5)?;
             e.nodes = t[1..5].iter().map(|n| map_node(n)).collect();
-            e.model = Some(t[5].clone());
+            e.model = Some(model_name(&t[5]));
             instance_rest(&t[6..], "m", params, line, &mut e)?;
+        }
+        's' => {
+            need(5)?;
+            e.nodes = t[1..5].iter().map(|n| map_node(n)).collect();
+            e.model = Some(model_name(&t[5]));
+            key_values(&t[6..], params, line, &mut e.params, &mut e.flags)?;
+        }
+        'w' => {
+            need(4)?;
+            e.nodes = vec![map_node(&t[1]), map_node(&t[2])];
+            e.control = Some(map_ref(&t[3]));
+            e.model = Some(model_name(&t[4]));
+            key_values(&t[5..], params, line, &mut e.params, &mut e.flags)?;
         }
         'e' | 'g' => {
             need(5)?;
@@ -814,20 +1074,15 @@ fn expand_element(
         'f' | 'h' => {
             need(4)?;
             e.nodes = vec![map_node(&t[1]), map_node(&t[2])];
-            let ctrl = &t[3];
-            e.control = Some(if prefix.is_empty() {
-                ctrl.clone()
-            } else {
-                format!("{prefix}.{ctrl}")
-            });
+            e.control = Some(map_ref(&t[3]));
             e.value = Some(value_of(&t[4], params, line)?);
         }
         'x' => {
             if depth > 32 {
                 return err(line, "subcircuit nesting too deep (recursive .subckt?)");
             }
-            let fields: Vec<&String> = t[1..].iter().take_while(|x| *x != "params:").collect();
-            let (sub_name, nodes) = fields.split_last().ok_or(ParseError {
+            let (fields, overrides) = split_params(card);
+            let (sub_name, nodes) = fields[1..].split_last().ok_or(ParseError {
                 line,
                 message: format!("{} needs a subcircuit name", t[0]),
             })?;
@@ -852,19 +1107,51 @@ fn expand_element(
                 .cloned()
                 .zip(nodes.iter().map(|n| map_node(n)))
                 .collect();
-            for inner in &sub.body {
-                if inner.tokens[0].starts_with('.') {
+            // Child scope: caller's parameters, then the subcircuit defaults,
+            // then the instance overrides (evaluated in the caller's scope),
+            // then local .param cards; local models shadow outer ones.
+            let mut child = scope.clone();
+            for (k, v) in &sub.defaults {
+                let x = eval_value(v, &child.params, line)?;
+                child.params.insert(k.clone(), x);
+            }
+            for (k, v) in &overrides {
+                if !sub.defaults.iter().any(|(d, _)| d == k) {
                     deck.warnings.push(format!(
-                        "line {}: directive {} inside .subckt ignored",
-                        inner.line, inner.tokens[0]
+                        "line {line}: {}: '{k}' is not a parameter of '{sub_name}'",
+                        t[0]
                     ));
+                }
+                let x = eval_value(v, &scope.params, line)?;
+                child.params.insert(k.clone(), x);
+            }
+            for inner in sub.body.iter().filter(|c| c.tokens[0] == ".param") {
+                eval_params(inner, &mut child.params)?;
+            }
+            for inner in sub.body.iter().filter(|c| c.tokens[0] == ".model") {
+                let mut m = parse_model(inner, &child.params)?;
+                let local = m.name.clone();
+                m.name = format!("{}.{local}", e.name);
+                m.line = line;
+                child.models.insert(local, m.name.clone());
+                deck.models.insert(m.name.clone(), m);
+            }
+            for inner in &sub.body {
+                let head = inner.tokens[0].as_str();
+                if head == ".param" || head == ".model" {
+                    continue;
+                }
+                if head.starts_with('.') {
+                    deck.warnings
+                        .push(format!("line {}: directive {head} inside .subckt ignored", inner.line));
                     continue;
                 }
                 let c = Card {
                     line,
                     tokens: inner.tokens.clone(),
+                    raw: inner.raw.clone(),
                 };
-                expand_element(&c, &e.name, &map, subckts, params, deck, depth + 1)?;
+                expand_element(&c, &e.name, &map, subckts, &child, deck, depth + 1)?;
             }
             return Ok(());
         }
@@ -989,6 +1276,71 @@ mod tests {
         assert_eq!(deck.elements[1].nodes, vec!["m", "0"]);
         assert_eq!(deck.elements[2].nodes, vec!["m", "m2"]);
         assert_eq!(deck.elements[0].value, Some(2000.0));
+    }
+
+    #[test]
+    fn param_expressions_subckt_params_and_local_models() {
+        let deck = parse_str(
+            "p\n\
+             .param r0 = 1k  c0={1u/2}\n\
+             .param fc = 1/(2*pi*r0*c0) twice = r0*2\n\
+             .subckt stage in out params: r=1k gain=2\n\
+             .param r2 = {r*gain}\n\
+             .model dloc d is=1e-15 n={gain}\n\
+             R1 in out {r2}\n\
+             D1 out 0 dloc\n\
+             .ends\n\
+             X1 a b stage params: r={twice} gain=3\n\
+             X2 b c stage\n\
+             R9 c 0 {fc > 100 ? 1 : 2}\n",
+        )
+        .unwrap();
+        assert!((deck.params["fc"] - 1.0 / (2.0 * std::f64::consts::PI * 1e3 * 0.5e-6)).abs() < 1e-9);
+        let r = |n: &str| deck.elements.iter().find(|e| e.name == n).unwrap();
+        assert_eq!(r("x1.r1").value, Some(6000.0));
+        assert_eq!(r("x2.r1").value, Some(2000.0));
+        assert_eq!(r("r9").value, Some(1.0));
+        assert_eq!(r("x1.d1").model.as_deref(), Some("x1.dloc"));
+        assert_eq!(deck.models["x1.dloc"].params["n"], 3.0);
+        assert_eq!(deck.models["x2.dloc"].params["n"], 2.0);
+    }
+
+    #[test]
+    fn ac_nested_dc_temp_and_new_elements() {
+        let deck = parse_str(
+            "t\n\
+             V1 a 0 DC 1 AC 2 45\n\
+             L1 a b 1m\n\
+             L2 c 0 4m\n\
+             K1 L1 L2 0.9\n\
+             S1 b 0 a 0 sw1 on\n\
+             W1 c 0 v1 sw2\n\
+             .model sw1 sw vt=1\n\
+             .model sw2 csw it=1m\n\
+             .ac dec 10 1 1meg\n\
+             .dc v1 0 5 1 v2 0 1 0.5\n\
+             .temp 85\n",
+        )
+        .unwrap();
+        let src = deck.elements[0].source.as_ref().unwrap();
+        assert_eq!((src.dc, src.ac, src.ac_phase), (Some(1.0), Some(2.0), 45.0));
+        assert_eq!(deck.elements[3].refs, vec!["l1", "l2"]);
+        assert_eq!(deck.elements[4].flags, vec!["on"]);
+        assert_eq!(deck.elements[5].control.as_deref(), Some("v1"));
+        assert!(matches!(
+            deck.analyses[0],
+            Analysis::Ac {
+                sweep: AcSweep::Dec,
+                points: 10,
+                ..
+            }
+        ));
+        assert!(matches!(&deck.analyses[1], Analysis::Dc { outer: Some(o), .. } if o.source == "v2" && o.stop == 1.0));
+        assert_eq!(deck.temp, Some(85.0));
+        let f = AcSweep::Dec.frequencies(10, 1.0, 1e6);
+        assert_eq!(f.len(), 61);
+        assert!((f[60] - 1e6).abs() < 1e-3);
+        assert_eq!(AcSweep::Lin.frequencies(5, 0.0, 4.0), vec![0.0, 1.0, 2.0, 3.0, 4.0]);
     }
 
     #[test]

@@ -18,7 +18,7 @@ pub struct OpPoint {
     pub iterations: usize,
 }
 
-fn output_vars(ckt: &Circuit) -> Vec<usize> {
+pub(crate) fn output_vars(ckt: &Circuit) -> Vec<usize> {
     ckt.vars()
         .iter()
         .enumerate()
@@ -28,12 +28,27 @@ fn output_vars(ckt: &Circuit) -> Vec<usize> {
         .collect()
 }
 
+/// Device probe outputs (e.g. LED optical power) at solution `x`.
+pub(crate) fn probes(ckt: &Circuit, x: &[f64]) -> Vec<(String, f64)> {
+    let mut out = Vec::new();
+    for d in ckt.devices() {
+        d.probes(x, &mut out);
+    }
+    out
+}
+
 impl OpPoint {
     pub(crate) fn new(ckt: &Circuit, x: &[f64], method: OpMethod, iterations: usize) -> Self {
         let idx = output_vars(ckt);
+        let mut names: Vec<String> = idx.iter().map(|&i| ckt.vars()[i].name.clone()).collect();
+        let mut values: Vec<f64> = idx.iter().map(|&i| x[i]).collect();
+        for (n, v) in probes(ckt, x) {
+            names.push(n);
+            values.push(v);
+        }
         Self {
-            names: idx.iter().map(|&i| ckt.vars()[i].name.clone()).collect(),
-            values: idx.iter().map(|&i| x[i]).collect(),
+            names,
+            values,
             method,
             iterations,
         }
@@ -87,6 +102,7 @@ pub struct Waveforms {
     /// Transient statistics (zero for sweeps).
     pub stats: TranStats,
     vars: Vec<usize>,
+    n_probes: usize,
 }
 
 /// A DC sweep result.
@@ -95,21 +111,40 @@ pub type Sweep = Waveforms;
 impl Waveforms {
     pub(crate) fn new(ckt: &Circuit, x_name: String) -> Self {
         let vars = output_vars(ckt);
+        let mut names: Vec<String> = vars.iter().map(|&i| ckt.vars()[i].name.clone()).collect();
+        let probe_names = probes(ckt, &vec![0.0; ckt.unknowns() + 1]);
+        let n_probes = probe_names.len();
+        names.extend(probe_names.into_iter().map(|(n, _)| n));
         Self {
             x_name,
             x: Vec::new(),
-            names: vars.iter().map(|&i| ckt.vars()[i].name.clone()).collect(),
-            columns: vec![Vec::new(); vars.len()],
+            columns: vec![Vec::new(); names.len()],
+            names,
             stats: TranStats::default(),
             vars,
+            n_probes,
         }
     }
 
-    pub(crate) fn push(&mut self, xv: f64, sol: &[f64]) {
+    pub(crate) fn push(&mut self, ckt: &Circuit, xv: f64, sol: &[f64]) {
         self.x.push(xv);
         for (col, &i) in self.columns.iter_mut().zip(&self.vars) {
             col.push(sol[i]);
         }
+        if self.n_probes > 0 {
+            let base = self.vars.len();
+            for (k, (_, v)) in probes(ckt, sol).into_iter().enumerate().take(self.n_probes) {
+                self.columns[base + k].push(v);
+            }
+        }
+    }
+
+    /// Add a column computed by the analysis (e.g. the outer source of a
+    /// nested DC sweep). Must be called before any point is pushed.
+    pub(crate) fn add_column(&mut self, name: String) -> usize {
+        self.names.push(name);
+        self.columns.push(Vec::new());
+        self.columns.len() - 1
     }
 
     /// A signal's samples by name (case-insensitive).
@@ -227,4 +262,65 @@ pub fn interpolate(xs: &[f64], ys: &[f64], x: f64) -> f64 {
         return ys[i];
     }
     ys[i - 1] + (ys[i] - ys[i - 1]) * (x - x0) / (x1 - x0)
+}
+
+/// Small-signal (`.ac`) result: complex phasors per frequency.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AcResult {
+    /// Frequencies (Hz).
+    pub freq: Vec<f64>,
+    /// Signal names (`v(node)`, `i(source)`).
+    pub names: Vec<String>,
+    /// Real parts, one column per signal.
+    pub re: Vec<Vec<f64>>,
+    /// Imaginary parts, one column per signal.
+    pub im: Vec<Vec<f64>>,
+}
+
+impl AcResult {
+    fn index(&self, name: &str) -> Option<usize> {
+        let key = name.to_ascii_lowercase();
+        self.names.iter().position(|n| *n == key)
+    }
+
+    /// Magnitudes of a signal.
+    pub fn mag(&self, name: &str) -> Option<Vec<f64>> {
+        let i = self.index(name)?;
+        Some(self.re[i].iter().zip(&self.im[i]).map(|(r, m)| r.hypot(*m)).collect())
+    }
+
+    /// Magnitudes in dB (20·log10).
+    pub fn db(&self, name: &str) -> Option<Vec<f64>> {
+        Some(self.mag(name)?.into_iter().map(|m| 20.0 * m.log10()).collect())
+    }
+
+    /// Phases in degrees (-180..180].
+    pub fn phase_deg(&self, name: &str) -> Option<Vec<f64>> {
+        let i = self.index(name)?;
+        Some(
+            self.re[i]
+                .iter()
+                .zip(&self.im[i])
+                .map(|(r, m)| m.atan2(*r).to_degrees())
+                .collect(),
+        )
+    }
+
+    /// Write `frequency,mag(sig),ph(sig),...` with phases in degrees.
+    pub fn write_csv(&self, w: &mut dyn Write) -> io::Result<()> {
+        write!(w, "frequency")?;
+        for n in &self.names {
+            write!(w, ",mag({n}),ph({n})")?;
+        }
+        writeln!(w)?;
+        for (k, f) in self.freq.iter().enumerate() {
+            write!(w, "{f:.12e}")?;
+            for i in 0..self.names.len() {
+                let (r, m) = (self.re[i][k], self.im[i][k]);
+                write!(w, ",{:.12e},{:.12e}", r.hypot(m), m.atan2(r).to_degrees())?;
+            }
+            writeln!(w)?;
+        }
+        Ok(())
+    }
 }

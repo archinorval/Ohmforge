@@ -4,13 +4,16 @@
 //!   factorisation computed once and reused for every Newton iteration.
 //! * [`circuit`]: the [`Circuit`] container and the [`Device`] trait that
 //!   every model implements (setup, stamping, breakpoints).
-//! * [`devices`]: R, C, L, independent V/I sources (DC, PULSE, SIN, EXP,
-//!   PWL), linear controlled sources (E, G, F, H), diode, Gummel-Poon BJT
-//!   and level-1 MOSFET.
+//! * [`devices`]: R, C (with ESR/ESL), L (with series resistance), coupled
+//!   inductors (K), independent V/I sources (DC, AC, PULSE, SIN, EXP, PWL),
+//!   linear controlled sources (E, G, F, H), voltage/current-controlled
+//!   switches (S, W), diode and LED, Gummel-Poon BJT and level-1/level-3
+//!   MOSFETs, all with SPICE3 temperature scaling.
 //! * [`analysis`]: DC operating point (Newton-Raphson with junction
-//!   limiting, then damped Newton, gmin stepping and source stepping), DC
-//!   sweeps and transient analysis (backward Euler start, trapezoidal or
-//!   Gear-2, LTE-controlled steps, exact breakpoints).
+//!   limiting, then damped Newton, gmin stepping and source stepping),
+//!   single and nested DC sweeps, small-signal AC and transient analysis
+//!   (backward Euler start, trapezoidal or Gear-2, LTE-controlled steps,
+//!   exact breakpoints).
 //! * [`netlist`]: builds a circuit from a parsed SPICE deck.
 //!
 //! ```

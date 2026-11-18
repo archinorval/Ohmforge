@@ -37,6 +37,7 @@ fn load_params(mode: Mode, time: f64, tran: TranSpec) -> LoadParams {
         time,
         tran,
         tran_op: false,
+        small_signal: false,
     }
 }
 
@@ -155,7 +156,7 @@ pub fn transient(ckt: &mut Circuit, opts: &Options, req: &TranRequest) -> Result
     }]);
     let mut out = Waveforms::new(ckt, "time".into());
     if req.tstart <= 0.0 {
-        out.push(0.0, &x);
+        out.push(ckt, 0.0, &x);
     }
     let next_bp = |ckt: &Circuit, t: f64| -> f64 {
         ckt.devices()
@@ -229,7 +230,7 @@ pub fn transient(ckt: &mut Circuit, opts: &Options, req: &TranRequest) -> Result
         x.copy_from_slice(&x_new);
         out.stats.accepted += 1;
         if t >= req.tstart {
-            out.push(t, &x);
+            out.push(ckt, t, &x);
         }
         h_prev = h;
         let mut h_next = (2.0 * h).min(h_lte);

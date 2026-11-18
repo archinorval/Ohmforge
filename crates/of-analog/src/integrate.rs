@@ -59,6 +59,8 @@ pub struct Integrator {
     pub order: u8,
     /// Current step.
     pub h: f64,
+    /// Previous accepted step (equal to `h` on the first step).
+    pub h_prev: f64,
     /// Coefficient of `q_n`.
     pub ag0: f64,
     ag1: f64,
@@ -71,6 +73,7 @@ impl Default for Integrator {
             method: Method::Trapezoidal,
             order: 1,
             h: 1.0,
+            h_prev: 1.0,
             ag0: 0.0,
             ag1: 0.0,
             ag2: 0.0,
@@ -97,9 +100,25 @@ impl Integrator {
             method,
             order,
             h,
+            h_prev,
             ag0,
             ag1,
             ag2,
+        }
+    }
+
+    /// Pseudo-integrator for small-signal linearisation: every capacitor
+    /// stamps `ag0 * C`, so loading with `ag0 = 0` and `ag0 = 1` separates
+    /// the conductance and capacitance matrices.
+    pub fn small_signal(ag0: f64) -> Self {
+        Self {
+            method: Method::Trapezoidal,
+            order: 1,
+            h: f64::INFINITY,
+            h_prev: f64::INFINITY,
+            ag0,
+            ag1: 0.0,
+            ag2: 0.0,
         }
     }
 

@@ -18,6 +18,7 @@ fn params(max_iter: usize, init: bool, src: f64, diag: f64, tran: Option<TranSpe
         time: 0.0,
         tran: tran.unwrap_or_default(),
         tran_op: tran.is_some(),
+        small_signal: false,
     };
     NrParams {
         load,
@@ -166,6 +167,39 @@ pub fn operating_point(ckt: &mut Circuit, opts: &Options) -> Result<OpPoint, Ana
     Ok(OpPoint::new(ckt, &x, method, iterations))
 }
 
+/// One DC sweep axis: a source stepped from `start` to `stop` by `step`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DcAxis {
+    /// Independent source name.
+    pub source: String,
+    /// First value.
+    pub start: f64,
+    /// Last value (included when reached by whole steps).
+    pub stop: f64,
+    /// Increment (sign must match the direction).
+    pub step: f64,
+}
+
+impl DcAxis {
+    fn values(&self) -> Result<Vec<f64>, AnalysisError> {
+        let (start, stop, step) = (self.start, self.stop, self.step);
+        if step == 0.0 || (stop - start) * step < 0.0 {
+            return Err(AnalysisError::Invalid(format!(
+                ".dc step {step} cannot go from {start} to {stop}"
+            )));
+        }
+        let count = ((stop - start) / step + 1e-9).floor() as usize + 1;
+        Ok((0..count).map(|k| start + step * k as f64).collect())
+    }
+}
+
+fn set_source(ckt: &mut Circuit, source: &str, v: f64) -> Result<(), AnalysisError> {
+    if ckt.device_mut(source).is_none_or(|d| !d.set_dc(v)) {
+        return Err(AnalysisError::UnknownSource(source.into()));
+    }
+    Ok(())
+}
+
 /// Sweep the DC value of independent source `source` from `start` to `stop`.
 pub fn dc_sweep(
     ckt: &mut Circuit,
@@ -175,30 +209,56 @@ pub fn dc_sweep(
     stop: f64,
     step: f64,
 ) -> Result<Sweep, AnalysisError> {
+    let inner = DcAxis {
+        source: source.into(),
+        start,
+        stop,
+        step,
+    };
+    dc_sweep_nested(ckt, opts, &inner, None)
+}
+
+/// DC sweep of `inner`, repeated for every value of `outer` if given (as
+/// SPICE `.dc src1 ... src2 ...`). The result's x axis is the inner
+/// source; nested sweeps add a column named after the outer source, and
+/// the inner sweep restarts for each outer value.
+pub fn dc_sweep_nested(
+    ckt: &mut Circuit,
+    opts: &Options,
+    inner: &DcAxis,
+    outer: Option<&DcAxis>,
+) -> Result<Sweep, AnalysisError> {
     ckt.finalize()?;
-    if step == 0.0 || (stop - start) * step < 0.0 {
-        return Err(AnalysisError::Invalid(format!(
-            ".dc step {step} cannot go from {start} to {stop}"
-        )));
-    }
-    if ckt.device_mut(source).is_none_or(|d| !d.set_dc(start)) {
-        return Err(AnalysisError::UnknownSource(source.into()));
-    }
-    let count = ((stop - start) / step + 1e-9).floor() as usize + 1;
+    let inner_values = inner.values()?;
+    set_source(ckt, &inner.source, inner.start)?;
+    let outer_values = match outer {
+        Some(o) => {
+            set_source(ckt, &o.source, o.start)?;
+            o.values()?
+        }
+        None => vec![f64::NAN],
+    };
     let mut states = States::new(ckt.n_states);
     let mut x = Vec::new();
-    let mut sweep = Sweep::new(ckt, source.to_string());
-    for k in 0..count {
-        let v = start + step * k as f64;
-        if let Some(d) = ckt.device_mut(source) {
-            d.set_dc(v);
+    let mut sweep = Sweep::new(ckt, inner.source.clone());
+    let outer_col = outer.map(|o| sweep.add_column(o.source.clone()));
+    let mut first = true;
+    for &ov in &outer_values {
+        if let Some(o) = outer {
+            set_source(ckt, &o.source, ov)?;
         }
-        let warm = k > 0;
-        if solve_op(ckt, &mut x, &mut states, opts, None, warm).is_err() {
-            x.clear();
-            solve_op(ckt, &mut x, &mut states, opts, None, false)?;
+        for &v in &inner_values {
+            set_source(ckt, &inner.source, v)?;
+            if solve_op(ckt, &mut x, &mut states, opts, None, !first).is_err() {
+                x.clear();
+                solve_op(ckt, &mut x, &mut states, opts, None, false)?;
+            }
+            first = false;
+            sweep.push(ckt, v, &x);
+            if let Some(c) = outer_col {
+                sweep.columns[c].push(ov);
+            }
         }
-        sweep.push(v, &x);
     }
     Ok(sweep)
 }
