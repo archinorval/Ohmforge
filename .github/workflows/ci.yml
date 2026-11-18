@@ -48,4 +48,7 @@ jobs:
       - run: scripts/build-riscv-tests.sh
       - run: cargo test -p of-cpu-riscv --test riscv_tests -- --nocapture
       # The committed test firmware must be reproducible from its source.
-      - run: bash firmware/esp32c3-blinky/build.sh && git diff --exit-code -- firmware/
+      - run: |
+          bash firmware/esp32c3-blinky/build.sh
+          bash firmware/esp32c3-timer-irq/build.sh
+          git diff --exit-code -- firmware/
