@@ -11,10 +11,10 @@ Thank you for helping. This project is pre-alpha, so the best contributions righ
 
 ## Licence hygiene (important)
 
-- Code you contribute is licensed MIT OR Apache-2.0; part data and artwork CC-BY-4.0.
-- **Never** add a GPL, LGPL or AGPL dependency to the workspace. `cargo deny check` enforces this.
+- Code you contribute is licensed AGPL-3.0-or-later; part data, artwork and docs CC-BY-SA-4.0.
+- Only add dependencies with licences on the `deny.toml` allow list (permissive licences plus AGPL-3.0). **Never** add a GPL-2.0-only or LGPL dependency. `cargo deny check` enforces this.
 - Do not copy or translate code from GPL projects (Falstad CircuitJS, SimulIDE, QEMU) or proprietary ones (Wokwi). Ideas and published algorithms are fine; code is not.
-- QEMU integration lives in a separate repository and process; this workspace only contains the MIT/Apache IPC client.
+- QEMU integration lives in a separate repository and process; this workspace only contains the IPC client.
 
 ## Before you open a pull request
 
