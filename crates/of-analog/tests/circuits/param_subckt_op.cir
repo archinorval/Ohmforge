@@ -1,0 +1,16 @@
+Parameter expressions, subcircuit parameters and a subcircuit-local model
+* compare: v(out) v(mid)
+.param vsup=9 rbase={2*4.7k} ratio=0.5
+.subckt stage in out vcc rl=2k
+.model qloc npn is=1e-15 bf={beta} vaf=80
+.param beta=150
+RB vcc in {rbase}
+RC vcc out {rl*ratio*2}
+Q1 out in 0 qloc
+.ends
+VCC vcc 0 {vsup}
+VIN src 0 1
+RIN src mid {1k + 200}
+X1 mid out vcc stage rl={3k}
+.op
+.end

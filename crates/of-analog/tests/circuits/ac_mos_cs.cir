@@ -1,0 +1,10 @@
+Common-source amplifier with Meyer and bulk junction capacitances
+* compare: vm(d) vp(d)
+VDD vdd 0 5
+VG g0 0 DC 1.2 AC 1
+RG g0 g 10k
+RD vdd d 10k
+M1 d g 0 0 nm w=20u l=2u ad=40p as=40p pd=24u ps=24u
+.model nm nmos level=1 vto=0.7 kp=50u gamma=0.5 phi=0.65 lambda=0.02 tox=20n cgso=0.3n cgdo=0.3n cgbo=0.2n cj=0.4m mj=0.5 cjsw=0.3n mjsw=0.33 pb=0.8 js=1u
+.ac dec 10 1k 10g
+.end

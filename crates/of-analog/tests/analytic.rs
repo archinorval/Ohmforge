@@ -279,3 +279,177 @@ fn build_errors_are_clear() {
     let deck = parse_str("t\nF1 a 0 vx 2\nR1 a 0 1\n.op\n").unwrap();
     assert!(netlist::build(&deck).is_err());
 }
+
+fn ac(src: &str) -> of_analog::results::AcResult {
+    let mut b = build(src);
+    let a = b
+        .analyses
+        .iter()
+        .find(|a| matches!(a, Analysis::Ac { .. }))
+        .cloned()
+        .expect(".ac");
+    let f = Built::ac_frequencies(&a).unwrap();
+    analysis::ac_analysis(&mut b.circuit, &b.options, &f).expect("ac")
+}
+
+#[test]
+fn ac_rc_corner_is_minus_3db_and_minus_45_degrees() {
+    let (r, c) = (1e3, 100e-9);
+    let fc = 1.0 / (2.0 * std::f64::consts::PI * r * c);
+    let a = ac(&format!(
+        "t\nV1 in 0 DC 0 AC 1\nR1 in out {r}\nC1 out 0 {c}\n.ac lin 1 {fc} {fc}\n"
+    ));
+    assert!((a.mag("v(out)").unwrap()[0] - std::f64::consts::FRAC_1_SQRT_2).abs() < 1e-9);
+    assert!((a.phase_deg("v(out)").unwrap()[0] + 45.0).abs() < 1e-7);
+    // Decade sweep: 10 points per decade plus the end point.
+    let a = ac("t\nV1 in 0 AC 2 90\nR1 in out 1k\nC1 out 0 1u\n.ac dec 10 1 1k\n");
+    assert_eq!(a.freq.len(), 31);
+    // Source phase carries through: at 1 Hz the output is ~2∠90°.
+    assert!((a.mag("v(out)").unwrap()[0] - 2.0).abs() < 1e-3);
+    assert!((a.phase_deg("v(out)").unwrap()[0] - 90.0).abs() < 0.5);
+}
+
+#[test]
+fn ac_series_rlc_resonance_and_q() {
+    // Voltage across R peaks at 1/(2π√LC) with unity gain.
+    let (l, c, r): (f64, f64, f64) = (10e-3, 1e-6, 10.0);
+    let f0 = 1.0 / (2.0 * std::f64::consts::PI * (l * c).sqrt());
+    let a = ac(&format!(
+        "t\nV1 in 0 AC 1\nL1 in a {l}\nC1 a b {c}\nR1 b 0 {r}\n.ac lin 3 {} {}\n",
+        f0 * 0.5,
+        f0 * 1.5
+    ));
+    let m = a.mag("v(b)").unwrap();
+    assert!((m[1] - 1.0).abs() < 1e-9, "{m:?}");
+    let w = 2.0 * std::f64::consts::PI * f0 * 0.5;
+    let x = w * l - 1.0 / (w * c);
+    assert!((m[0] - r / (r * r + x * x).sqrt()).abs() < 1e-9);
+}
+
+#[test]
+fn coupled_inductors_transform_by_turns_ratio() {
+    // k = 1, L2 = 4 L1 (turns ratio 2): open-circuit secondary doubles.
+    // (A tiny source resistance keeps the DC operating point defined.)
+    let ratio = |a: &of_analog::results::AcResult| a.mag("v(s)").unwrap()[0] / a.mag("v(p)").unwrap()[0];
+    let a = ac("t\nV1 x 0 AC 1\nRS x p 1m\nL1 p 0 1m\nL2 s 0 4m\nK1 L1 L2 1\nRL s 0 1e9\n.ac lin 1 1k 1k\n");
+    assert!((ratio(&a) - 2.0).abs() < 1e-6);
+    assert!((a.phase_deg("v(s)").unwrap()[0] - a.phase_deg("v(p)").unwrap()[0]).abs() < 1e-6);
+    // Negative coupling inverts.
+    let a = ac("t\nV1 x 0 AC 1\nRS x p 1m\nL1 p 0 1m\nL2 s 0 1m\nK1 L1 L2 -0.5\nRL s 0 1e9\n.ac lin 1 1k 1k\n");
+    assert!((ratio(&a) - 0.5).abs() < 1e-6);
+    // Transient: sine on the primary, the secondary follows k·sqrt(L2/L1).
+    let w = tran("t\nV1 x 0 SIN(0 1 1k)\nRS x p 1m\nL1 p 0 1m\nL2 s 0 9m\nK1 L1 L2 0.9\nRL s 0 1e9\n.tran 10u 2m\n");
+    let vp = w.signal("v(p)").unwrap().to_vec();
+    let vs = w.signal("v(s)").unwrap();
+    let err = vp.iter().zip(vs).map(|(p, s)| (s - 2.7 * p).abs()).fold(0.0, f64::max);
+    assert!(err < 0.01, "{err}");
+}
+
+#[test]
+fn capacitor_esr_and_esl_set_the_high_frequency_impedance() {
+    // Driven by 1 A: v = Z. At the series resonance |Z| = ESR.
+    let (c, esl, esr): (f64, f64, f64) = (1e-6, 1e-9, 0.05);
+    let f0 = 1.0 / (2.0 * std::f64::consts::PI * (c * esl).sqrt());
+    let a = ac(&format!(
+        "t\nI1 0 a AC 1\nRDC a 0 1e12\nC1 a 0 {c} esr={esr} esl={esl}\n.ac lin 1 {f0} {f0}\n"
+    ));
+    assert!((a.mag("v(a)").unwrap()[0] - esr).abs() < 1e-9);
+    // Inductor winding resistance appears in DC.
+    let p = op("t\nV1 a 0 1\nL1 a 0 1m rser=2\n.op\n");
+    assert!((p.get("i(v1)").unwrap() + 0.5).abs() < 1e-12);
+}
+
+#[test]
+fn resistor_temperature_coefficients() {
+    // R(T) = R (1 + tc1 dT + tc2 dT²) with dT = 100 - 27.
+    let p = op("t\n.temp 100\nV1 a 0 1\nR1 a 0 1k tc1=1m tc2=10u\n.op\n");
+    let dt: f64 = 73.0;
+    let r = 1e3 * (1.0 + 1e-3 * dt + 1e-5 * dt * dt);
+    assert!((p.get("i(v1)").unwrap() + 1.0 / r).abs() < 1e-12);
+}
+
+#[test]
+fn switches_follow_control_with_hysteresis() {
+    let p = op("t\nVC c 0 3\nV1 a 0 1\nS1 a b c 0 sm\nR1 b 0 1k\n.model sm sw vt=2 vh=0.5 ron=1 roff=1meg\n.op\n");
+    assert!((p.get("v(b)").unwrap() - 1000.0 / 1001.0).abs() < 1e-9);
+    // Inside the band the initial state is held: `on` keeps it closed.
+    let src = "t\nVC c 0 2\nV1 a 0 1\nS1 a b c 0 sm {}\nR1 b 0 1k\n.model sm sw vt=2 vh=0.5 ron=1 roff=1meg\n.op\n";
+    let on = op(&src.replace("{}", "on"));
+    let off = op(&src.replace("{}", ""));
+    assert!(on.get("v(b)").unwrap() > 0.99);
+    assert!(off.get("v(b)").unwrap() < 1e-2);
+    // Current-controlled switch.
+    let p = op("t\nI1 0 x 5m\nVS x 0 0\nV1 a 0 1\nW1 a b VS wm\nR1 b 0 1k\n.model wm csw it=1m ron=1 roff=1meg\n.op\n");
+    assert!(p.get("v(b)").unwrap() > 0.99);
+}
+
+#[test]
+fn led_optical_outputs() {
+    // vf/if define IS; 20 mA through the LED gives bright = 1 and the
+    // optical power eqe·I·hc/(qλ).
+    let p = op("t\nI1 0 a 20m\nD1 a 0 red\n.model red led(vf=2.0 if=20m wavelength=630n eqe=0.2)\n.op\n");
+    // (Newton stops within its tolerances, so allow a little slack.)
+    assert!((p.get("v(a)").unwrap() - 2.0).abs() < 1e-4);
+    assert!((p.get("bright(d1)").unwrap() - 1.0).abs() < 1e-3);
+    let popt = 0.2 * 20e-3 * 1.239_841_98e-6 / 630e-9;
+    assert!((p.get("popt(d1)").unwrap() - popt).abs() < 1e-3 * popt);
+    // Probes also appear in sweeps.
+    let mut b = build("t\nV1 x 0 0\nR1 x a 100\nD1 a 0 red\n.model red led(vf=2.0)\n.dc V1 0 5 1\n");
+    let w = analysis::dc_sweep(&mut b.circuit, &b.options, "v1", 0.0, 5.0, 1.0).unwrap();
+    let bright = w.signal("bright(d1)").unwrap();
+    assert!(bright[0].abs() < 1e-6 && bright[5] > 0.5);
+}
+
+#[test]
+fn nested_dc_sweep_repeats_the_inner_axis() {
+    let mut b = build("t\nV1 a 0 0\nV2 b 0 0\nR1 a b 1k\n.dc V1 0 2 1 V2 0 1 0.5\n");
+    let Analysis::Dc {
+        source,
+        start,
+        stop,
+        step,
+        outer,
+    } = b.analyses[0].clone()
+    else {
+        panic!()
+    };
+    let o = outer.unwrap();
+    let inner = analysis::DcAxis {
+        source,
+        start,
+        stop,
+        step,
+    };
+    let outer = analysis::DcAxis {
+        source: o.source,
+        start: o.start,
+        stop: o.stop,
+        step: o.step,
+    };
+    let w = analysis::dc_sweep_nested(&mut b.circuit, &b.options, &inner, Some(&outer)).unwrap();
+    assert_eq!(w.x, vec![0.0, 1.0, 2.0, 0.0, 1.0, 2.0, 0.0, 1.0, 2.0]);
+    let i = w.signal("i(v1)").unwrap();
+    let v2 = w.signal("v2").unwrap();
+    for k in 0..9 {
+        assert!((i[k] + (w.x[k] - v2[k]) / 1e3).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn diode_forward_voltage_tracks_temperature() {
+    let vf = |t: f64| {
+        op(&format!(
+            "t\n.temp {t}\nI1 0 a 1m\nD1 a 0 dm\n.model dm d is=1e-14\n.op\n"
+        ))
+        .get("v(a)")
+        .unwrap()
+    };
+    let slope = (vf(77.0) - vf(27.0)) / 50.0;
+    assert!(slope < -1.5e-3 && slope > -2.5e-3, "{slope}");
+}
+
+#[test]
+fn param_expressions_reach_the_circuit() {
+    let p = op("t\n.param r1=2k r2={r1/2} v={3*2}\nV1 a 0 {v}\nR1 a b {r1}\nR2 b 0 {r2}\n.op\n");
+    assert!((p.get("v(b)").unwrap() - 2.0).abs() < 1e-9);
+}

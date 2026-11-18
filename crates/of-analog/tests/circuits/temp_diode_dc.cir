@@ -1,0 +1,9 @@
+Diode I-V at 85 C with a 25 C model (TNOM, EG, XTI, junction scaling)
+* compare: v(a) i(v1)
+V1 in 0 0
+R1 in a 100
+D1 a 0 dt
+.model dt d is=2n n=1.8 rs=0.5 eg=1.11 xti=3 tnom=25 cjo=4p vj=0.7 m=0.4 bv=30 ibv=1u
+.temp 85
+.dc V1 -0.5 5 0.05
+.end

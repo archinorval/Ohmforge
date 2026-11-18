@@ -1,0 +1,11 @@
+Vertical NPN switch with XTF/VTF/ITF, IRB/RBM, split CJC, substrate cap and excess phase
+* compare: v(c) v(b)
+VCC vcc 0 5
+VIN in 0 PULSE(0 3 5n 2n 2n 40n 100n)
+RB in b 2k
+RC vcc c 1k
+Q1 c b 0 sub qhf
+VSUB sub 0 -1
+.model qhf npn is=1e-16 bf=120 nf=1 vaf=60 ikf=20m ise=2e-15 ne=1.5 br=2 nr=1 isc=1e-14 nc=2 rb=300 irb=1m rbm=40 re=2 rc=30 cje=0.6p vje=0.85 mje=0.35 tf=0.2n xtf=4 vtf=3 itf=30m ptf=25 cjc=0.5p vjc=0.7 mjc=0.4 xcjc=0.6 tr=5n cjs=1p vjs=0.6 mjs=0.4 fc=0.5
+.tran 0.1n 100n 0 0.1n
+.end

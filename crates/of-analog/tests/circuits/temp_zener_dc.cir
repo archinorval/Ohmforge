@@ -1,0 +1,9 @@
+Zener breakdown at -20 C with TCV and NBV
+* compare: v(k)
+V1 in 0 0
+R1 in k 1k
+D1 0 k dz
+.model dz d is=1f n=1 bv=6.2 ibv=5m nbv=1.5 tcv=2m
+.temp -20
+.dc V1 0 15 0.1
+.end

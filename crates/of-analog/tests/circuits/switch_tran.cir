@@ -1,0 +1,16 @@
+Voltage- and current-controlled switches with hysteresis
+* compare: v(out) v(out2)
+VC ctl 0 PWL(0 0 50u 5 100u 0 150u 5 200u 0)
+S1 vdd out ctl 0 swm
+VDD vdd 0 5
+R1 out 0 2k
+C1 out 0 10n
+VSENSE ctl s2 0
+RS s2 0 1k
+W1 vdd out2 VSENSE cswm
+R2 out2 0 4k
+C2 out2 0 5n
+.model swm sw vt=2.5 vh=0.5 ron=1k roff=1meg
+.model cswm csw it=2m ih=0.5m ron=2k roff=10meg
+.tran 0.05u 200u 0 0.05u
+.end

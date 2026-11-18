@@ -7,7 +7,8 @@
 # but one GPL file exists in its tree; running the binary keeps us clear of
 # it entirely).
 #
-# Usage: NGSPICE=/path/to/ngspice scripts/gen-ngspice-golden.sh
+# Usage: NGSPICE=/path/to/ngspice scripts/gen-ngspice-golden.sh [name ...]
+# (no names: regenerate every circuit)
 set -euo pipefail
 NGSPICE="${NGSPICE:-ngspice}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -19,14 +20,24 @@ trap 'rm -rf "$tmp"' EXIT
 version="$("$NGSPICE" -v 2>/dev/null | grep -o 'ngspice-[0-9.]*' | head -1)"
 for cir in "$cir_dir"/*.cir; do
   name="$(basename "$cir" .cir)"
+  if [ $# -gt 0 ] && [[ " $* " != *" $name "* ]]; then continue; fi
   vecs="$(sed -n 's/^\* compare: //p' "$cir")"
   deck="$tmp/$name.cir"
   # Deck without .end, plus a control block that writes the vectors.
   grep -vi '^\.end$' "$cir" > "$deck"
+  # "* ngspice-replace: FROM => TO" lines rewrite Ohmforge-only syntax
+  # (ESR/ESL, LED models, ...) into plain SPICE for the reference run; a
+  # literal \n in TO starts a new line.
+  while IFS= read -r rep; do
+    from="${rep%% => *}"
+    to="${rep#* => }"
+    FROM="$from" TO="${to//\\n/$'\n'}" perl -i -pe 'next if /^\* ngspice-replace:/; s/\Q$ENV{FROM}\E/$ENV{TO}/g' "$deck"
+  done < <(sed -n 's/^\* ngspice-replace: //p' "$cir")
   cat >> "$deck" <<CTRL
 .control
 set wr_singlescale
 set wr_vecnames
+set units=degrees
 option numdgt=12
 run
 wrdata $tmp/$name.dat $vecs

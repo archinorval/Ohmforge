@@ -1,0 +1,12 @@
+BJT bias network at 100 C (XTB, XTI, EG and leakage scaling)
+* compare: v(c) v(e) v(b)
+.options temp=100
+VCC vcc 0 12
+R1 vcc b 47k
+R2 b 0 10k
+RC vcc c 3.9k
+RE e 0 1k
+Q1 c b e qt
+.model qt npn is=6.734f bf=416.4 vaf=74.03 ikf=66.78m ise=6.734f ne=1.259 br=.7371 isc=1f nc=2 rb=10 rc=1 re=0.1 xtb=1.5 xti=3 eg=1.11
+.op
+.end
