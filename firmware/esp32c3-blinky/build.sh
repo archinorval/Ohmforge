@@ -8,4 +8,6 @@ ZIGCC=${ZIGCC:-python3 -m ziglang cc}
 $ZIGCC -target riscv32-freestanding-none -mcpu=generic_rv32+m+c \
     -nostdlib -static -g0 -Wl,-T,link.ld -Wl,--build-id=none -Wl,-z,norelro -Wl,-z,max-page-size=16 \
     -o blinky.elf blinky.S
+# Linkers mark their output executable; the committed ELF is a data file (100644).
+chmod 644 blinky.elf
 echo "built $(wc -c < blinky.elf) bytes"
