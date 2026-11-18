@@ -116,7 +116,7 @@ Run all of these before proposing a commit; they mirror `.github/workflows/ci.ym
 ## 7. Git rules
 
 - **Do not commit without Stefan's approval.** Leave changes in the working tree, report what changed, and propose a commit breakdown with messages; commit only what he approves.
-- The remote is `origin` = <https://github.com/sjnorval/Ohmforge> (branch `main`). **Push only when Stefan explicitly asks**, never force-push, and never handle tokens (use the machine's existing git credentials). Before a push, check that no secrets or build artefacts are tracked.
+- The remote is `origin` = <https://github.com/sjnorval/Ohmforge>. This history (P1 analog core, RISC-V core, kernel) is on branch `p1-analog-core`, which is unrelated to the remote `main` (an earlier scaffold and dense-matrix solver); until Stefan decides how to reconcile them (see the open PR), push only to `p1-analog-core` and never rewrite remote `main`. **Push only when Stefan explicitly asks**, never force-push, and never handle tokens (use the machine's existing git credentials). Before a push, check that no secrets or build artefacts are tracked.
 - Every commit is signed off: `git commit -s`.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`; small, logical commits.
 - Never rewrite or force-change existing history.
