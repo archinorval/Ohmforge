@@ -1,4 +1,4 @@
-//! ESP32-C3 SoC: memory map, peripherals, ROM hooks.
+//! ESP32-C3 SoC: memory map, peripherals, direct ELF boot and the kernel engine.
 //!
 //! [`Esp32c3`] wires an [`of_cpu_riscv::Hart`] to [`SocBus`], the C3 memory
 //! map (ROM, SRAM through its IRAM and DRAM windows, the flash cache windows

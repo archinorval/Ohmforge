@@ -1,9 +1,6 @@
 # Contributor Covenant Code of Conduct
 
-> Adapted from the [Contributor Covenant](https://www.contributor-covenant.org), version 2.1 (CC-BY-4.0). The maintainer contact below must be filled in before the repository is published.
-
-
-# Contributor Covenant Code of Conduct
+> Adapted from the [Contributor Covenant](https://www.contributor-covenant.org), version 2.1 (CC-BY-4.0). The maintainer contact below is still to be filled in (tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md)).
 
 ## Our Pledge
 

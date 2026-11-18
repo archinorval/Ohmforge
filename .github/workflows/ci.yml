@@ -1,4 +1,4 @@
-# Inert until the repository is pushed to GitHub.
+# Runs on every push and pull request (https://github.com/sjnorval/Ohmforge/actions).
 name: ci
 on: [push, pull_request]
 jobs:

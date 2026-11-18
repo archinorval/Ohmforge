@@ -83,7 +83,7 @@ Internal dependencies point downwards only: `of-core` depends on nothing interna
 - **Boot:** direct ELF boot for now (`Esp32c3::load_elf` copies segments, zero-fills `.bss`, sets the PC to `e_entry`). Booting through the real ROM (esp-rom-elfs) and flash images come later.
 - **Peripherals:** every peripheral access sets a sync request; `Esp32c3::run_slice` then stamps pin changes and UART bytes with `hart.local_time()` (end of the instruction) and latches SYSTIMER. Unmodelled peripheral registers read back the last write and are counted in `SocBus::unmodelled()`: check it when new firmware misbehaves. GPIO input reads see the level from the last sync (pre-access stops come with the mixed-signal sync item).
 - **Pins to analog:** `Esp32c3Engine` turns changes on linked pins into kernel events (`pin_code`: pin, drive strength, low/high/Hi-Z) at the exact hart time and returns early there; register it before the analog engine and map every code from `all_pin_codes(pin)` to `PinDriver` `v`/`r` with `PinOut::thevenin` (output resistance about 120/60/30/15 Ω per drive strength: an estimate, not a datasheet value).
-- **Test firmware:** `firmware/esp32c3-blinky` (`blinky.S`, `link.ld`, `build.sh`): bare-metal RV32IMC assembly built with zig (`pip install ziglang==0.17.1`). The 1.5 KB `blinky.elf` is committed so tests need no toolchain; CI rebuilds it and fails if it differs. Rebuild with `firmware/esp32c3-blinky/build.sh` after editing the source and commit both. Test firmware is our own code (AGPL-3.0-or-later); never commit third-party binaries.
+- **Test firmware:** `firmware/esp32c3-blinky` (`blinky.S`, `link.ld`, `build.sh`; overview in `firmware/README.md`): bare-metal RV32IMC assembly built with zig (`pip install ziglang==0.17.1`). The 1.5 KB `blinky.elf` is committed (mode 644; `build.sh` resets it because lld marks outputs executable) so tests need no toolchain; CI rebuilds it and fails if it differs in content or mode. Rebuild with `firmware/esp32c3-blinky/build.sh` after editing the source and commit both. Test firmware is our own code (AGPL-3.0-or-later); never commit third-party binaries.
 
 ## 4. Coding conventions
 
@@ -117,6 +117,7 @@ cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digita
 .\scripts\build-riscv-tests.ps1                  # optional: fetch and build riscv-tests (needs zig or a RISC-V gcc)
 cargo test -p of-cpu-riscv --test riscv_tests -- --nocapture
 cargo test -p of-soc-esp32c3                     # blinky on the SoC and co-simulated with an LED
+bash firmware/esp32c3-blinky/build.sh            # optional: rebuild the test firmware (needs zig, `pip install ziglang==0.17.1`, and bash, e.g. Git Bash)
 cargo run -p of-cli -- --version
 cargo test -p of-analog --test ngspice_compare -- --nocapture   # prints the ngspice comparison table
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv

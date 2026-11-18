@@ -1,8 +1,8 @@
 # Roadmap and task list
 
-Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified and all checks in `AGENTS.md` pass; `[~]` means done in the working tree but not yet committed. Status as of 18 November 2026.
+Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified, all checks in `AGENTS.md` pass and it is committed; `[~]` means partly done (what is missing is noted on the item). Work on a feature branch counts once it is pushed with green CI. Status as of 18 November 2026 (`main` has P1; P2 work is on branch `p2-esp32c3-blinky`).
 
-**Current phase: P1 Analog core is complete; next is P2** (ESP32-C3 SoC on the RISC-V core, co-simulated with the analog solver through the `of-core` kernel). Phase one (the RISC-V CPU core, pulled forward from P2) is done. P0 leftovers continue alongside.
+**Current phase: P2 ESP32-C3 MVP, in progress** (ESP32-C3 SoC on the RISC-V core, co-simulated with the analog solver through the `of-core` kernel). P1 Analog core and phase one (the RISC-V CPU core, pulled forward from P2) are done; the first P2 slice (blinky end to end) is in. P0 leftovers continue alongside.
 
 ## Phase one: RISC-V CPU core (`of-cpu-riscv`)
 
@@ -16,8 +16,8 @@ Status: done; the core is implemented and tested (62 unit tests, 1 doc test, 75 
 - [x] Cycle model (`TimingModel`, uncalibrated C3 estimates) and `SimTime` mapping (`run_until`, `idle_until`, `local_time`)
 - [x] Debugger API: `step`, `run`, breakpoints, halt/resume/reset, register/CSR access, `disassemble_at`
 - [x] riscv-tests harness (`tests/riscv_tests.rs`) and build scripts (`scripts/build-riscv-tests.sh` / `.ps1`), CI job
-- [~] Engine adapter: implement the `of-core` `Engine` trait so the kernel drives the hart in quanta (done at SoC level as `of_soc_esp32c3::Esp32c3Engine`; register the CPU before the analog engine)
-- [ ] `of-soc-esp32c3`: memory map bus (IROM/DROM via flash cache, IRAM/DRAM, ROM, peripherals) on top of `Bus`
+- [x] Engine adapter: the `of-core` kernel drives the hart in quanta (done at SoC level as `of_soc_esp32c3::Esp32c3Engine`; register the CPU before the analog engine)
+- [x] `of-soc-esp32c3`: memory map bus (IROM/DROM flash windows, IRAM/DRAM, ROM, RTC fast, peripherals) on top of `Bus` (`SocBus`; no cache MMU yet)
 - [ ] ESP32-C3 custom CSRs (e.g. performance counters `mpcer`/`mpcmr`/`mpccr`, GPIO CSRs) through `Bus::csr_read`/`csr_write`
 - [ ] Interrupt matrix model feeding `set_interrupt_lines` (priority, threshold, edge/level)
 - [ ] Calibrate `TimingModel` against a real ESP32-C3 (cycle counts of benchmark loops, flash cache misses)
@@ -32,12 +32,12 @@ Status: done; the core is implemented and tested (62 unit tests, 1 doc test, 75 
 - [x] Cargo workspace with stub crates matching the planned layout
 - [x] Licences (AGPL-3.0-or-later code, CC-BY-SA-4.0 parts and docs; relicensed from MIT OR Apache-2.0 / CC-BY-4.0 in November 2026), NOTICE, README, CONTRIBUTING, Code of Conduct
 - [x] rustfmt, clippy, cargo-deny and toolchain configuration
-- [x] CI workflow file (inert until pushed)
+- [x] CI workflow on GitHub Actions: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm32 check, GUI check, riscv-tests and the test-firmware rebuild check
 - [x] Example part (`parts/sensors/bosch-bme280/part.toml`) parsed by `of-parts`
 - [x] Agent guides (`AGENTS.md`, `.grok/rules/`, this roadmap)
 - [x] GUI scaffold ported to eframe 0.37 (`App::ui`) with X11/Wayland backends so the Linux CI GUI check builds
 - [ ] `of-core`: scheduler snapshot/restore and replay log
-- [x] `of-core`: `Engine` trait (`advance_to(limit, ctx) -> reached`, `next_event`, `on_event`) and `Kernel` (quantum slices, events, breakpoints, host stops); used by the analog engine, CPU adapter next
+- [x] `of-core`: `Engine` trait (`advance_to(limit, ctx) -> reached`, `next_event`, `on_event`) and `Kernel` (quantum slices, events, breakpoints, host stops); used by the analog engine and the ESP32-C3 engine
 - [ ] Project file format v0 (`project.toml` + circuit file) with serde round-trip tests
 - [ ] `of-parts`: JSON Schema generation (schemars) and a validator command in `of-cli`
 - [ ] `of-cli`: `ohmforge validate-parts parts/`
@@ -80,19 +80,19 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
 
 - [x] RV32IMC interpreter passing riscv-tests (see phase one; riscv-arch-test still to do)
 - [ ] ELF loading (`object`, `gimli`), flash image layout, ROM from esp-rom-elfs
-  - [~] ELF32 RISC-V reader in `of-firmware` (segments, symbols; own code, no `object` dependency yet) and direct ELF boot (`Esp32c3::load_elf`)
+  - [x] ELF32 RISC-V reader in `of-firmware` (segments, symbols; own code, no `object` dependency yet) and direct ELF boot (`Esp32c3::load_elf`)
   - [ ] DWARF line info (`gimli`), ESP image / flash layout, ROM boot from esp-rom-elfs
 - [ ] C3 memory map, interrupt matrix, systimer, timer groups, UART
-  - [~] Memory map (ROM, SRAM IRAM/DRAM alias, flash cache windows, RTC fast, peripheral dispatch with read-back for unmodelled registers)
+  - [x] Memory map (ROM, SRAM IRAM/DRAM alias, flash cache windows, RTC fast, peripheral dispatch with read-back for unmodelled registers)
   - [~] SYSTIMER unit 0 counter (update/valid/value); alarms and interrupts to do
   - [~] UART0 TX capture; baud timing and RX to do
   - [ ] Interrupt matrix, timer groups, watchdogs
 - [ ] GPIO/IOMUX with electrical pin model (drive strength, thresholds, pulls)
-  - [~] GPIO out/enable (+W1TS/W1TC), GPIO matrix `OUT_SEL` 128 and inversion, IO MUX function and drive strength, Thevenin pin model (estimated resistances)
+  - [x] GPIO out/enable (+W1TS/W1TC), GPIO matrix `OUT_SEL` 128 and inversion, IO MUX function and drive strength, Thevenin pin model (estimated resistances)
   - [ ] Inputs with thresholds and hysteresis, pulls, open drain, interrupts
 - [ ] ADC with attenuation, nonlinearity and noise; LEDC PWM
 - [ ] Mixed-signal sync: CPU stops on MMIO, analog advances to the exact time
-  - [~] `Esp32c3Engine`: stops after each peripheral access, pin changes become kernel events at the exact hart time (blinky drives an LED + resistor, `tests/blinky_led.rs`)
+  - [x] `Esp32c3Engine`: stops after each peripheral access, pin changes become kernel events at the exact hart time (blinky drives an LED + resistor, `tests/blinky_led.rs`)
   - [ ] Stop before input reads so GPIO/ADC reads see the analog value at that instant
 - [ ] egui schematic editor (place, wire, probe), oscilloscope, logic analyser with UART decode, serial monitor
 - [ ] BOM v1: CSV with MPN, supplier links, ZAR cost; generated build checklist
@@ -100,14 +100,14 @@ Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 
 
 ### First milestone: blinky end to end
 
-Each step lands with its own tests; firmware is ours and tiny, built with zig and committed (CI checks it rebuilds byte-identical).
+Each step lands with its own tests; firmware is ours and tiny, built with zig and committed (CI checks it rebuilds byte-identical). Steps 1 to 6 are on branch `p2-esp32c3-blinky`.
 
-1. [~] Memory map and bus (`SocBus`): region routing, aliases, read-only ROM/flash, fetch rules (unit tests)
-2. [~] ELF reader (`of-firmware`) and direct boot (`Esp32c3::load_elf`): hand-built ELF, truncation and malformed-file tests, real zig-built ELF
-3. [~] GPIO + minimal IO MUX/GPIO matrix output path (unit tests per register and alias)
-4. [~] SYSTIMER unit 0 read path, UART0 TX capture (unit tests; banner check in the blinky test)
-5. [~] Blinky firmware (`firmware/esp32c3-blinky`, RV32IMC asm, SYSTIMER-timed): edges every 250 µs without drift (`tests/blinky.rs`)
-6. [~] `Esp32c3Engine` + `PinDriver` + parts-library LED and resistor under the kernel: LED current switches with a 500 µs period, about 4 mA on (`tests/blinky_led.rs`)
+1. [x] Memory map and bus (`SocBus`): region routing, aliases, read-only ROM/flash, fetch rules (unit tests)
+2. [x] ELF reader (`of-firmware`) and direct boot (`Esp32c3::load_elf`): hand-built ELF, truncation and malformed-file tests, real zig-built ELF
+3. [x] GPIO + minimal IO MUX/GPIO matrix output path (unit tests per register and alias)
+4. [x] SYSTIMER unit 0 read path, UART0 TX capture (unit tests; banner check in the blinky test)
+5. [x] Blinky firmware (`firmware/esp32c3-blinky`, RV32IMC asm, SYSTIMER-timed): edges every 250 µs without drift (`tests/blinky.rs`)
+6. [x] `Esp32c3Engine` + `PinDriver` + parts-library LED and resistor under the kernel: LED current switches with a 500 µs period, about 4 mA on (`tests/blinky_led.rs`)
 7. [ ] Same blinky from esp-hal (Rust, `riscv32imc-unknown-none-elf`) once the ROM boot path, cache MMU, watchdogs and the interrupt matrix exist
 8. [ ] Arduino-ESP32 / ESP-IDF blink through the real ROM and a flash image
 
