@@ -265,6 +265,14 @@ pub trait Device: std::fmt::Debug + Send {
     /// Derived outputs at solution `x`, e.g. an LED's optical power, as
     /// `(name, value)` pairs such as `("popt(d1)", 1e-3)`.
     fn probes(&self, _x: &[f64], _out: &mut Vec<(String, f64)>) {}
+
+    /// Change a run-time parameter between time slices (the scheduler
+    /// engine; for example a pin driver's `v` and `r`, or a source's `dc`).
+    /// Returns `false` if the device has no such parameter. The matrix
+    /// pattern must not change.
+    fn set_param(&mut self, _name: &str, _value: f64) -> bool {
+        false
+    }
 }
 
 /// Build errors.
@@ -372,6 +380,17 @@ impl Circuit {
     /// Description of every variable (index 0 is ground).
     pub fn vars(&self) -> &[VarInfo] {
         &self.vars
+    }
+
+    /// The variable named `v(node)` or `i(device)` (case-insensitive);
+    /// a bare name is taken as a node. Branch currents and internal nodes
+    /// exist only after [`Circuit::finalize`].
+    pub fn var_named(&self, name: &str) -> Option<Var> {
+        let key = name.to_ascii_lowercase();
+        if !key.contains('(') {
+            return self.find_node(&key);
+        }
+        self.vars.iter().position(|v| v.name == key)
     }
 
     /// Run device setup and build the sparse system. Called automatically by

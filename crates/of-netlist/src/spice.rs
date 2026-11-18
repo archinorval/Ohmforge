@@ -164,6 +164,9 @@ pub struct Element {
     pub flags: Vec<String>,
     /// Source specification for V and I elements.
     pub source: Option<SourceSpec>,
+    /// `POLY(n)` coefficients of a nonlinear E or G source (empty for a
+    /// linear one); `nodes[2..]` are then the `n` controlling node pairs.
+    pub coeffs: Vec<f64>,
     /// Line number of the card (in the top-level file).
     pub line: usize,
 }
@@ -991,6 +994,7 @@ fn expand_element(
         params: BTreeMap::new(),
         flags: Vec::new(),
         source: None,
+        coeffs: Vec::new(),
         line,
     };
     match letter {
@@ -1065,6 +1069,34 @@ fn expand_element(
             e.control = Some(map_ref(&t[3]));
             e.model = Some(model_name(&t[4]));
             key_values(&t[5..], params, line, &mut e.params, &mut e.flags)?;
+        }
+        'e' | 'g' if t.get(3).is_some_and(|k| k == "poly") => {
+            // SPICE2 polynomial source: `E n+ n- POLY(n) c1+ c1- ... p0 p1 ...`.
+            let dim = match (t.get(4), t.get(5), t.get(6)) {
+                (Some(o), Some(d), Some(c)) if o == "(" && c == ")" => d.parse::<usize>().ok(),
+                _ => None,
+            }
+            .filter(|d| (1..=8).contains(d))
+            .ok_or(ParseError {
+                line,
+                message: format!("{}: expected POLY(n) with 1 <= n <= 8", t[0]),
+            })?;
+            let ctrl_end = 7 + 2 * dim;
+            if t.len() <= ctrl_end {
+                return err(
+                    line,
+                    format!("{}: POLY({dim}) needs {} control nodes and coefficients", t[0], 2 * dim),
+                );
+            }
+            e.nodes = [&t[1], &t[2]]
+                .into_iter()
+                .chain(&t[7..ctrl_end])
+                .map(|n| map_node(n))
+                .collect();
+            e.coeffs = t[ctrl_end..]
+                .iter()
+                .map(|v| value_of(v, params, line))
+                .collect::<Result<_, _>>()?;
         }
         'e' | 'g' => {
             need(5)?;
@@ -1255,6 +1287,17 @@ mod tests {
         assert!(matches!(deck.analyses[1], Analysis::Tran { uic: true, .. }));
         assert_eq!(deck.options["method"], 2.0);
         assert_eq!(deck.initial_conditions["out"], 1.0);
+    }
+
+    #[test]
+    fn poly_sources() {
+        let d = parse_str("t\nG1 0 o POLY(2) a 0 b 0 0 0 0 0 1\nE1 x 0 poly(1) a 0 1 2\n").unwrap();
+        assert_eq!(d.elements[0].nodes, ["0", "o", "a", "0", "b", "0"]);
+        assert_eq!(d.elements[0].coeffs, [0.0, 0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(d.elements[1].coeffs, [1.0, 2.0]);
+        assert!(d.elements[1].value.is_none());
+        assert!(parse_str("t\nG1 0 o POLY(2) a 0 b 0\n").is_err());
+        assert!(parse_str("t\nG1 0 o POLY 2 a 0 1\n").is_err());
     }
 
     #[test]

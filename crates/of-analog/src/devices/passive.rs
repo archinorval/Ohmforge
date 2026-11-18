@@ -50,6 +50,14 @@ impl Device for Resistor {
     fn load(&mut self, cx: &mut LoadCtx<'_>) {
         cx.conductance(&self.s, 1.0 / self.ohms);
     }
+    fn set_param(&mut self, name: &str, value: f64) -> bool {
+        if name == "r" && value.is_finite() && value != 0.0 {
+            self.ohms = value;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 /// Linear capacitor with optional initial voltage (used with `uic`).

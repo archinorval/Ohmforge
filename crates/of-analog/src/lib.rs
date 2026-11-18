@@ -14,6 +14,8 @@
 //!   single and nested DC sweeps, small-signal AC and transient analysis
 //!   (backward Euler start, trapezoidal or Gear-2, LTE-controlled steps,
 //!   exact breakpoints).
+//! * [`engine`]: [`AnalogEngine`], the transient solver as an `of-core`
+//!   engine (time slices, pin drivers, threshold watches).
 //! * [`netlist`]: builds a circuit from a parsed SPICE deck.
 //!
 //! ```
@@ -27,6 +29,7 @@
 pub mod analysis;
 pub mod circuit;
 pub mod devices;
+pub mod engine;
 pub mod integrate;
 pub mod matrix;
 pub mod netlist;
@@ -34,5 +37,6 @@ pub mod results;
 pub mod waveform;
 
 pub use analysis::{AnalysisError, Options};
-pub use circuit::{Circuit, Device, GROUND, Var};
+pub use circuit::{Circuit, CircuitError, Device, GROUND, Var};
+pub use engine::{AnalogEngine, Edge, EngineConfig, SetParam};
 pub use results::{OpPoint, Sweep, Waveforms};

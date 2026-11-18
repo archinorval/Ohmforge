@@ -4,7 +4,7 @@
 mod ac;
 mod dc;
 mod newton;
-mod tran;
+pub(crate) mod tran;
 
 pub use ac::ac_analysis;
 pub use dc::{DcAxis, OpMethod, dc_sweep, dc_sweep_nested, operating_point};

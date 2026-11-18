@@ -6,7 +6,8 @@ use crate::analysis::{Options, TranRequest};
 use crate::circuit::{Circuit, CircuitError};
 use crate::devices::{
     Bjt, BjtModel, Capacitor, Control, ControlledSource, CurrentSource, Diode, DiodeModel, Inductor, MosGeometry,
-    MosModel, Mosfet, MutualInductance, Resistor, SourceValue, Switch, SwitchControl, SwitchModel, VoltageSource,
+    MosModel, Mosfet, MutualInductance, PolyKind, PolySource, Resistor, SourceValue, Switch, SwitchControl,
+    SwitchModel, VoltageSource,
 };
 use crate::waveform::Wave;
 
@@ -92,14 +93,59 @@ fn bad(e: &Element, message: impl Into<String>) -> BuildError {
 /// Kelvin offset of the Celsius scale.
 const KELVIN: f64 = 273.15;
 
+/// Circuit-wide settings used while adding elements.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BuildEnv {
+    /// Circuit temperature (°C).
+    pub temp_c: f64,
+    /// Nominal model temperature (°C).
+    pub tnom_c: f64,
+}
+
+impl Default for BuildEnv {
+    fn default() -> Self {
+        Self {
+            temp_c: 27.0,
+            tnom_c: 27.0,
+        }
+    }
+}
+
+impl BuildEnv {
+    /// Temperatures from a deck's `.temp` and `.options temp/tnom`.
+    pub fn from_deck(deck: &Deck) -> Self {
+        Self {
+            temp_c: deck.temp.or_else(|| deck.options.get("temp").copied()).unwrap_or(27.0),
+            tnom_c: deck.options.get("tnom").copied().unwrap_or(27.0),
+        }
+    }
+}
+
 /// Convert a deck into a circuit.
 pub fn build(deck: &Deck) -> Result<Built, BuildError> {
     let mut c = Circuit::new();
     let mut warnings = deck.warnings.clone();
     let mut options = Options::default();
     options.apply(&deck.options);
-    let temp_c = deck.temp.or_else(|| deck.options.get("temp").copied()).unwrap_or(27.0);
-    let tnom_c = deck.options.get("tnom").copied().unwrap_or(27.0);
+    let env = BuildEnv::from_deck(deck);
+    add_deck(&mut c, deck, &env, &mut warnings)?;
+    c.finalize()?;
+    Ok(Built {
+        circuit: c,
+        options,
+        analyses: deck.analyses.clone(),
+        warnings,
+        ic: deck.initial_conditions.clone(),
+        temp: env.temp_c + KELVIN,
+    })
+}
+
+/// Add every element of `deck` to an existing (not yet finalised)
+/// circuit; nodes with the same name are shared, so several decks (for
+/// example one per placed part) can be merged. Analyses, options and
+/// `.ic` cards of the deck are ignored here.
+pub fn add_deck(c: &mut Circuit, deck: &Deck, env: &BuildEnv, warnings: &mut Vec<String>) -> Result<(), BuildError> {
+    let (temp_c, tnom_c) = (env.temp_c, env.tnom_c);
     let circuit_temp = temp_c + KELVIN;
     // Model parameters with the circuit TNOM filled in.
     let with_tnom = |m: &of_netlist::spice::Model| {
@@ -214,6 +260,22 @@ pub fn build(deck: &Deck) -> Result<Built, BuildError> {
                     c.add(CurrentSource::new(&e.name, nodes[0], nodes[1], sv).with_ac(ac))?;
                 }
             }
+            'e' | 'g' if !e.coeffs.is_empty() => {
+                let kind = if e.letter() == 'e' {
+                    PolyKind::Voltage
+                } else {
+                    PolyKind::Current
+                };
+                let ctrl = nodes[2..].chunks(2).map(|p| (p[0], p[1])).collect();
+                c.add(PolySource::new(
+                    &e.name,
+                    nodes[0],
+                    nodes[1],
+                    kind,
+                    ctrl,
+                    e.coeffs.clone(),
+                ))?;
+            }
             'e' => c.add(ControlledSource::new(
                 &e.name,
                 nodes[0],
@@ -247,7 +309,7 @@ pub fn build(deck: &Deck) -> Result<Built, BuildError> {
                     'w' => {
                         let m = model(&["csw"])?;
                         let (sm, unknown) = SwitchModel::from_params(true, &m.params);
-                        note_unknown(&mut warnings, e, unknown);
+                        note_unknown(warnings, e, unknown);
                         let on = e.flags.iter().any(|f| f == "on");
                         let ctl = SwitchControl::Current { source: src };
                         c.add(Switch::new(&e.name, nodes[0], nodes[1], ctl, sm, on))?;
@@ -271,7 +333,7 @@ pub fn build(deck: &Deck) -> Result<Built, BuildError> {
             's' => {
                 let m = model(&["sw"])?;
                 let (sm, unknown) = SwitchModel::from_params(false, &m.params);
-                note_unknown(&mut warnings, e, unknown);
+                note_unknown(warnings, e, unknown);
                 let on = e.flags.iter().any(|f| f == "on");
                 let ctl = SwitchControl::Voltage {
                     cp: nodes[2],
@@ -287,7 +349,7 @@ pub fn build(deck: &Deck) -> Result<Built, BuildError> {
                 } else {
                     DiodeModel::from_params(&p)
                 };
-                note_unknown(&mut warnings, e, unknown);
+                note_unknown(warnings, e, unknown);
                 let area = e.params.get("area").copied().unwrap_or(1.0);
                 c.add(Diode::new(&e.name, nodes[0], nodes[1], dm, area, off).with_temp(inst_temp))?;
             }
@@ -295,7 +357,7 @@ pub fn build(deck: &Deck) -> Result<Built, BuildError> {
                 let m = model(&["npn", "pnp"])?;
                 let pol = if m.kind == "npn" { 1.0 } else { -1.0 };
                 let (bm, unknown) = BjtModel::from_params(pol, &with_tnom(m));
-                note_unknown(&mut warnings, e, unknown);
+                note_unknown(warnings, e, unknown);
                 let area = e.params.get("area").copied().unwrap_or(1.0);
                 let mut q = Bjt::new(&e.name, nodes[0], nodes[1], nodes[2], bm, area, off).with_temp(inst_temp);
                 if let Some(&sub) = nodes.get(3) {
@@ -314,7 +376,7 @@ pub fn build(deck: &Deck) -> Result<Built, BuildError> {
                 }
                 let pol = if m.kind == "nmos" { 1.0 } else { -1.0 };
                 let (mm, unknown) = MosModel::from_params(pol, &with_tnom(m));
-                note_unknown(&mut warnings, e, unknown);
+                note_unknown(warnings, e, unknown);
                 let g = |k: &str| e.params.get(k).copied().unwrap_or(0.0);
                 let w = e.params.get("w").copied().unwrap_or(100e-6);
                 let l = e.params.get("l").copied().unwrap_or(100e-6);
@@ -334,15 +396,7 @@ pub fn build(deck: &Deck) -> Result<Built, BuildError> {
             other => return Err(bad(e, format!("element type '{other}' is not supported"))),
         }
     }
-    c.finalize()?;
-    Ok(Built {
-        circuit: c,
-        options,
-        analyses: deck.analyses.clone(),
-        warnings,
-        ic: deck.initial_conditions.clone(),
-        temp: circuit_temp,
-    })
+    Ok(())
 }
 
 fn note_unknown(warnings: &mut Vec<String>, e: &Element, unknown: Vec<String>) {

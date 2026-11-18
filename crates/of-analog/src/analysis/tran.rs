@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, VecDeque};
 
 use crate::circuit::{Circuit, LoadParams, Mode, TranSpec};
 use crate::integrate::{Integrator, States};
-use crate::results::Waveforms;
+use crate::results::{TranStats, Waveforms};
 
 use super::dc::solve_op;
 use super::newton::{NrOutcome, NrParams, newton, singular_error};
@@ -105,9 +105,312 @@ fn truncation_step(integ: &Integrator, t_new: f64, states: &States, hist: &VecDe
     best
 }
 
+/// A threshold watch: report when `x[var] - level` changes sign.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Crossing {
+    pub var: usize,
+    pub level: f64,
+    pub rising: bool,
+    pub falling: bool,
+}
+
+impl Crossing {
+    fn crossed(&self, a: f64, b: f64) -> bool {
+        let (s0, s1) = (a - self.level, b - self.level);
+        (self.rising && s0 < 0.0 && s1 >= 0.0) || (self.falling && s0 > 0.0 && s1 <= 0.0)
+    }
+}
+
+/// How an accepted step ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum StepEnd {
+    /// An ordinary step.
+    Free,
+    /// Landed on a device breakpoint (source corner) or the horizon.
+    Breakpoint,
+    /// Landed on the caller's target time.
+    Target,
+    /// Landed on (just after) a watched threshold crossing.
+    Crossing(usize),
+}
+
+/// The transient time-stepping state, shared by [`transient`] (one run to
+/// `tstop`) and the scheduler engine (advanced slice by slice).
+#[derive(Debug)]
+pub(crate) struct Stepper {
+    tran: TranSpec,
+    /// Time of the last accepted point (s).
+    pub t: f64,
+    h: f64,
+    h_prev: f64,
+    order: u8,
+    hist: VecDeque<Point>,
+    /// Solution at `t`.
+    pub x: Vec<f64>,
+    x_new: Vec<f64>,
+    states: States,
+    max_step: f64,
+    pub h_min: f64,
+    bp: f64,
+    horizon: f64,
+    pub stats: TranStats,
+}
+
+impl std::fmt::Debug for Point {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Point({})", self.t)
+    }
+}
+
+impl Stepper {
+    /// Operating point (or `uic` start), initial charges and history.
+    /// `horizon` caps the breakpoint search (`tstop` of a `.tran`).
+    pub fn start(ckt: &mut Circuit, opts: &Options, req: &TranRequest, horizon: f64) -> Result<Self, AnalysisError> {
+        ckt.finalize()?;
+        let tran = TranSpec {
+            tstep: req.tstep,
+            tstop: req.tstop,
+        };
+        let n = ckt.unknowns() + 1;
+        let mut states = States::new(ckt.n_states);
+        let mut x = vec![0.0; n];
+        if req.uic {
+            for (node, v) in &req.ic {
+                if let Some(var) = ckt.find_node(node) {
+                    x[var] = *v;
+                }
+            }
+            for d in ckt.devices() {
+                d.initial_condition(&mut x);
+            }
+        } else {
+            solve_op(ckt, &mut x, &mut states, opts, Some(tran), false)?;
+        }
+        // Initial charges, then seed the history.
+        let mut rhs = vec![0.0; n];
+        let mut lp = load_params(Mode::TranInit, 0.0, tran);
+        lp.gmin = opts.gmin;
+        ckt.load(&x, &mut rhs, &lp, &Integrator::default(), &mut states);
+        states.seed();
+
+        let span = req.tstop - req.tstart;
+        let max_step = if req.tmax > 0.0 {
+            req.tmax
+        } else {
+            req.tstep.min(span / 50.0)
+        };
+        let h_min = 1e-11 * max_step;
+        let h = (req.tstop / 100.0).min(req.tstep) / 10.0;
+        let hist = VecDeque::from([Point {
+            t: 0.0,
+            x: x.clone(),
+            q: states.now.clone(),
+        }]);
+        let mut st = Self {
+            tran,
+            t: 0.0,
+            h,
+            h_prev: h,
+            order: 1,
+            hist,
+            x_new: x.clone(),
+            x,
+            states,
+            max_step,
+            h_min,
+            bp: horizon,
+            horizon,
+            stats: TranStats::default(),
+        };
+        st.bp = st.next_bp(ckt);
+        Ok(st)
+    }
+
+    fn next_bp(&self, ckt: &Circuit) -> f64 {
+        let (t, h_min) = (self.t, self.h_min);
+        ckt.devices()
+            .filter_map(|d| d.next_breakpoint(t, &self.tran))
+            .filter(|&b| b > t + h_min)
+            .fold(self.horizon, f64::min)
+    }
+
+    /// The circuit changed at the current time (a source or parameter was
+    /// set from outside): restart the history like after a breakpoint.
+    pub fn discontinuity(&mut self, ckt: &Circuit) {
+        self.hist.retain(|p| p.t == self.t);
+        if self.hist.is_empty() {
+            self.hist.push_back(Point {
+                t: self.t,
+                x: self.x.clone(),
+                q: self.states.prev.clone(),
+            });
+        }
+        self.order = 1;
+        self.h = (0.1 * self.h).max(10.0 * self.h_min);
+        self.bp = self.next_bp(ckt);
+    }
+
+    /// Take one accepted step, never beyond `target` (which must be after
+    /// `t`). With `watches`, a step that crosses a threshold is redone so
+    /// that it ends within `resolution` seconds after the crossing.
+    pub fn step(
+        &mut self,
+        ckt: &mut Circuit,
+        opts: &Options,
+        target: f64,
+        watches: &[Crossing],
+        resolution: f64,
+    ) -> Result<StepEnd, AnalysisError> {
+        let h_min = self.h_min;
+        let mut clip: Option<f64> = None;
+        let mut redo = 0;
+        loop {
+            let mut h = self.h.min(self.max_step);
+            let h_free = h;
+            let mut hit = false;
+            let bp = self.bp;
+            let t = self.t;
+            if t + h >= bp - h_min {
+                h = bp - t;
+                hit = true;
+            } else if t + 2.0 * h > bp {
+                h = (bp - t) / 2.0;
+            }
+            // Caller's target or a crossing estimate, whichever is earlier.
+            let stop = clip.map_or(target, |c| c.min(target));
+            let mut at_target = false;
+            if t + h >= stop - h_min && stop < bp - h_min {
+                h = stop - t;
+                hit = false;
+                at_target = true;
+            }
+            let integ = Integrator::new(opts.method, self.order, h, self.h_prev);
+            let t_new = if hit {
+                bp
+            } else if at_target {
+                stop
+            } else {
+                t + h
+            };
+            let k_pred = (self.order as usize).min(self.hist.len() - 1);
+            let x_pred = predict(&self.hist, k_pred, t_new);
+            self.x_new.copy_from_slice(&x_pred);
+            self.x_new[0] = 0.0;
+            let p = NrParams {
+                load: load_params(Mode::Tran, t_new, self.tran),
+                max_iter: opts.itl4,
+                damping: None,
+            };
+            match newton(ckt, &mut self.x_new, &mut self.states, &integ, opts, p) {
+                NrOutcome::Converged(k) => self.stats.newton_iterations += k,
+                NrOutcome::Singular(v) => return Err(singular_error(ckt, Some(v))),
+                NrOutcome::NoConvergence => {
+                    self.stats.newton_iterations += opts.itl4;
+                    self.stats.rejected_newton += 1;
+                    self.h = h / 8.0;
+                    self.order = 1;
+                    if self.h < h_min {
+                        return Err(AnalysisError::TimestepTooSmall {
+                            time: t,
+                            reason: "Newton did not converge".into(),
+                        });
+                    }
+                    continue;
+                }
+            }
+
+            // Charge-based truncation error (SPICE CKTterr), skipped on the
+            // first step after a breakpoint where there is no usable history.
+            let mut h_lte = f64::INFINITY;
+            if self.hist.len() > self.order as usize {
+                h_lte = truncation_step(&integ, t_new, &self.states, &self.hist, opts);
+                if h_lte < 0.9 * h {
+                    self.stats.rejected_lte += 1;
+                    self.h = h_lte.max(h / 8.0);
+                    self.order = 1.max(self.order.min(self.hist.len() as u8 - 1));
+                    if self.h < h_min {
+                        return Err(AnalysisError::TimestepTooSmall {
+                            time: t,
+                            reason: "truncation error above tolerance".into(),
+                        });
+                    }
+                    continue;
+                }
+            }
+
+            // Threshold crossings: shorten the step to the (linearly
+            // interpolated) crossing until it lands within `resolution`.
+            let mut fired = None;
+            for (k, w) in watches.iter().enumerate() {
+                let (a, b) = (self.x[w.var], self.x_new[w.var]);
+                if w.crossed(a, b) {
+                    let tc = t + (t_new - t) * (w.level - a) / (b - a);
+                    if t_new - tc > resolution && redo < 12 && t_new - t > resolution {
+                        let c = clip.map_or(tc, |c: f64| c.min(tc));
+                        clip = Some(c.max(t + 0.5 * resolution.min(t_new - t)));
+                        fired = Some(usize::MAX);
+                        break;
+                    }
+                    fired.get_or_insert(k);
+                }
+            }
+            if fired == Some(usize::MAX) {
+                redo += 1;
+                self.h = h;
+                continue;
+            }
+
+            // Accept.
+            self.t = t_new;
+            self.states.rotate();
+            self.x.copy_from_slice(&self.x_new);
+            self.stats.accepted += 1;
+            self.h_prev = h;
+            let mut h_next = (2.0 * h).min(h_lte);
+            let end = if hit {
+                self.stats.breakpoints += 1;
+                self.hist.clear();
+                self.bp = self.next_bp(ckt);
+                // Restart gently after a corner (as SPICE does).
+                h_next = (0.1 * h.min(self.bp - self.t)).max(10.0 * h_min);
+                StepEnd::Breakpoint
+            } else if at_target {
+                // A slice end is not a discontinuity: keep the history and
+                // carry on with the step the error control wanted.
+                h_next = h_free.min(h_lte).max(h);
+                StepEnd::Target
+            } else {
+                StepEnd::Free
+            };
+            self.hist.push_back(Point {
+                t: self.t,
+                x: self.x.clone(),
+                q: self.states.now.clone(),
+            });
+            while self.hist.len() > 4 {
+                self.hist.pop_front();
+            }
+            // Second order needs three history points for its error estimate.
+            self.order = if self.hist.len() >= 3 { 2 } else { 1 };
+            self.h = h_next;
+            return Ok(match fired {
+                Some(k) => StepEnd::Crossing(k),
+                None if at_target && clip.is_some_and(|c| c < target) => StepEnd::Free,
+                None => end,
+            });
+        }
+    }
+
+    /// Final statistics.
+    pub fn finish_stats(&self, ckt: &Circuit) -> TranStats {
+        let mut s = self.stats;
+        s.factorisations = ckt.system.as_ref().map_or(0, |s| s.stats().factorisations);
+        s
+    }
+}
+
 /// Run a transient analysis.
 pub fn transient(ckt: &mut Circuit, opts: &Options, req: &TranRequest) -> Result<Waveforms, AnalysisError> {
-    ckt.finalize()?;
     let (tstep, tstop) = (req.tstep, req.tstop);
     if !(tstep > 0.0 && tstop > 0.0 && req.tstart >= 0.0 && req.tstart < tstop) {
         return Err(AnalysisError::Invalid(format!(
@@ -115,144 +418,17 @@ pub fn transient(ckt: &mut Circuit, opts: &Options, req: &TranRequest) -> Result
             req.tstart
         )));
     }
-    let tran = TranSpec { tstep, tstop };
-    let n = ckt.unknowns() + 1;
-    let mut states = States::new(ckt.n_states);
-    let mut x = vec![0.0; n];
-    if req.uic {
-        for (node, v) in &req.ic {
-            if let Some(var) = ckt.find_node(node) {
-                x[var] = *v;
-            }
-        }
-        for d in ckt.devices() {
-            d.initial_condition(&mut x);
-        }
-    } else {
-        solve_op(ckt, &mut x, &mut states, opts, Some(tran), false)?;
-    }
-    // Initial charges, then seed the history.
-    let mut rhs = vec![0.0; n];
-    let mut lp = load_params(Mode::TranInit, 0.0, tran);
-    lp.gmin = opts.gmin;
-    ckt.load(&x, &mut rhs, &lp, &Integrator::default(), &mut states);
-    states.seed();
-
-    let span = tstop - req.tstart;
-    let max_step = if req.tmax > 0.0 {
-        req.tmax
-    } else {
-        tstep.min(span / 50.0)
-    };
-    let h_min = 1e-11 * max_step;
-    let mut h = (tstop / 100.0).min(tstep) / 10.0;
-    let mut h_prev = h;
-    let mut order: u8 = 1;
-    let mut t = 0.0;
-    let mut hist: VecDeque<Point> = VecDeque::from([Point {
-        t: 0.0,
-        x: x.clone(),
-        q: states.now.clone(),
-    }]);
+    let mut st = Stepper::start(ckt, opts, req, tstop)?;
     let mut out = Waveforms::new(ckt, "time".into());
     if req.tstart <= 0.0 {
-        out.push(ckt, 0.0, &x);
+        out.push(ckt, 0.0, &st.x);
     }
-    let next_bp = |ckt: &Circuit, t: f64| -> f64 {
-        ckt.devices()
-            .filter_map(|d| d.next_breakpoint(t, &tran))
-            .filter(|&b| b > t + h_min)
-            .fold(tstop, f64::min)
-    };
-    let mut bp = next_bp(ckt, t);
-    let mut x_new = x.clone();
-
-    while t < tstop - h_min {
-        h = h.min(max_step);
-        let mut hit = false;
-        if t + h >= bp - h_min {
-            h = bp - t;
-            hit = true;
-        } else if t + 2.0 * h > bp {
-            h = (bp - t) / 2.0;
+    while st.t < tstop - st.h_min {
+        st.step(ckt, opts, f64::INFINITY, &[], 0.0)?;
+        if st.t >= req.tstart {
+            out.push(ckt, st.t, &st.x);
         }
-        let integ = Integrator::new(opts.method, order, h, h_prev);
-        let t_new = if hit { bp } else { t + h };
-        let k_pred = (order as usize).min(hist.len() - 1);
-        let x_pred = predict(&hist, k_pred, t_new);
-        x_new.copy_from_slice(&x_pred);
-        x_new[0] = 0.0;
-        let p = NrParams {
-            load: load_params(Mode::Tran, t_new, tran),
-            max_iter: opts.itl4,
-            damping: None,
-        };
-        match newton(ckt, &mut x_new, &mut states, &integ, opts, p) {
-            NrOutcome::Converged(k) => out.stats.newton_iterations += k,
-            NrOutcome::Singular(v) => return Err(singular_error(ckt, Some(v))),
-            NrOutcome::NoConvergence => {
-                out.stats.newton_iterations += opts.itl4;
-                out.stats.rejected_newton += 1;
-                h /= 8.0;
-                order = 1;
-                if h < h_min {
-                    return Err(AnalysisError::TimestepTooSmall {
-                        time: t,
-                        reason: "Newton did not converge".into(),
-                    });
-                }
-                continue;
-            }
-        }
-
-        // Charge-based truncation error (SPICE CKTterr), skipped on the
-        // first step after a breakpoint where there is no usable history.
-        let mut h_lte = f64::INFINITY;
-        if hist.len() > order as usize {
-            h_lte = truncation_step(&integ, t_new, &states, &hist, opts);
-            if h_lte < 0.9 * h {
-                out.stats.rejected_lte += 1;
-                h = h_lte.max(h / 8.0);
-                order = 1.max(order.min(hist.len() as u8 - 1));
-                if h < h_min {
-                    return Err(AnalysisError::TimestepTooSmall {
-                        time: t,
-                        reason: "truncation error above tolerance".into(),
-                    });
-                }
-                continue;
-            }
-        }
-
-        // Accept.
-        t = t_new;
-        states.rotate();
-        x.copy_from_slice(&x_new);
-        out.stats.accepted += 1;
-        if t >= req.tstart {
-            out.push(ckt, t, &x);
-        }
-        h_prev = h;
-        let mut h_next = (2.0 * h).min(h_lte);
-        if hit {
-            out.stats.breakpoints += 1;
-            hist.clear();
-            bp = next_bp(ckt, t);
-            // Restart gently after a corner (as SPICE does).
-            h_next = (0.1 * h.min(bp - t)).max(10.0 * h_min);
-        }
-        hist.push_back(Point {
-            t,
-            x: x.clone(),
-            q: states.now.clone(),
-        });
-        while hist.len() > 4 {
-            hist.pop_front();
-        }
-        // Second order needs three history points for its error estimate.
-        order = if hist.len() >= 3 { 2 } else { 1 };
-        h = h_next;
     }
-    out.stats.factorisations = ckt.system.as_ref().map_or(0, |s| s.stats().factorisations);
+    out.stats = st.finish_stats(ckt);
     Ok(out)
 }
