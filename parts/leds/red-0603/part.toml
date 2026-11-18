@@ -1,0 +1,36 @@
+# Red 0603 LED. The diode parameters give about 2.0 V at 20 mA, the
+# datasheet's typical forward voltage.
+[part]
+id = "generic.led-red-0603"
+name = "LED, red, 0603"
+category = "optoelectronic/led"
+model = "rust:led"
+verification = "community"
+
+[[pin]]
+number = "1"
+name = "K"
+kind = "passive"
+[[pin]]
+number = "2"
+name = "A"
+kind = "passive"
+
+[electrical]
+vf = { typ = 2.0, max = 2.5, unit = "V", note = "at 20 mA" }
+if_max = { max = 30e-3, unit = "A" }
+
+[analog]
+kind = "led"
+pins = ["A", "K"]
+params = { is = 1e-18, n = 2.0, rs = 4.0, cjo = 20e-12, wavelength = 625e-9, eqe = 0.15, if = 20e-3 }
+
+[[variant]]
+label = "Red 0603 LED"
+mpn = "APT1608EC"
+manufacturer = "Kingbright"
+footprint = "LED_SMD:LED_0603_1608Metric"
+
+[license]
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"

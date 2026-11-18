@@ -1,8 +1,10 @@
-# Ohmforge
+<p align="center">
+  <img src="assets/social-preview.png" alt="Ohmforge — emulate ESP32 in the browser. No board required." width="700">
+</p>
 
-> An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
+> **Working name.** An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
 
-**Status:** pre-alpha scaffold. Nothing simulates yet; the crates are compiling stubs that follow the plan in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md).
+**Status:** pre-alpha. The SPICE-grade analog solver (`of-analog`, checked against ngspice), the RV32IMC CPU core (`of-cpu-riscv`, passing riscv-tests), the co-simulation kernel (`of-core`) and the parts-to-devices bridge (`of-components`) work; the ESP32-C3 SoC and the GUI are next. The plan is in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md); progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Goals
 
@@ -48,32 +50,10 @@ cargo run -p of-cli -- --version
 cargo run -p of-app --features gui   # desktop window (pulls in egui)
 ```
 
+## Renaming the project
 
+"Ohmforge" and the `of-` crate prefix are placeholders. To rename, replace the strings `ohmforge`, `Ohmforge`, `of-` and `of_` across the repo and rename the `crates/of-*` folders. `scripts/rename.ps1` does this in one go (review the diff before committing).
 
-## Known Issues
-
-### Phase 0 (Pre-alpha) — Known limitations
-
-| Issue | Severity | Status |
-|---|---|---|
-| Analog solver is a dense stub (not sparse LU) | High | In progress |
-| No transient analysis yet (only DC operating point) | High | Planned for P1 |
-| CPU cores are placeholders (no real ISA implementation) | High | Planned for P2 |
-| No firmware loading (ELF/DWARF) | High | Planned for P2 |
-| QEMU IPC bridge not connected | High | Planned for P3 |
-| No GUI instruments (scope, logic analyser) | High | Planned for P2 |
-| No BOM export (CSV/XLSX/KiCad/JLCPCB) | Medium | Planned for P3 |
-| No KiCad netlist export | Medium | Planned for P3 |
-| No web app (WASM) | Medium | Planned for P4 |
-
-### Technical debt
-
-- `of-analog` currently uses a dense matrix solver with partial pivoting. Replaces with sparse LU (faer) once Windows toolchain is fixed.
-- `of-netlist` is a stub; circuit graph is not fully implemented.
-- `of-components` only has a `Resistor` stub; other components are planned.
-- No part library beyond BME280; will add more sensors and components.
-
-See `docs/DESIGN_AND_PLAN.md` for the full phased development plan.
 ## Licence
 
 Code: [GNU AGPL-3.0-or-later](LICENSE). If you distribute Ohmforge or a modified version, or offer it to users over a network, you must share the full source under the same licence. For closed-source commercial use, ask about a separate commercial licence.
@@ -85,4 +65,6 @@ Contributions are accepted under the Developer Certificate of Origin; see [CONTR
 
 ## Development Status
 
-- **Phase 0 (Pre-alpha)**: MNA solver with dense matrix fallback, capacitor/inductor state tracking, transient analysis in progress
+- **P1 Analog core**: done (sparse MNA with DC/AC/transient analyses, SPICE device models, AMS1117 macromodel, parts bridge; all within 1 % of ngspice).
+- **Phase one, RISC-V core**: done (RV32IMC(+A), 75 of 77 riscv-tests).
+- **P2 ESP32-C3 MVP**: next; see [`docs/ROADMAP.md`](docs/ROADMAP.md).

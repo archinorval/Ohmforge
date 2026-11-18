@@ -1,0 +1,11 @@
+Level-3 CMOS inverter driving a load, Meyer and bulk capacitances
+* compare: v(out) v(in)
+VDD vdd 0 5
+VIN in 0 PULSE(0 5 2n 1n 1n 10n 24n)
+MP out in vdd vdd p3 w=20u l=2u ad=40p as=40p pd=24u ps=24u
+MN out in 0 0 n3 w=10u l=2u ad=20p as=20p pd=14u ps=14u
+CL out 0 50f
+.model n3 nmos level=3 vto=0.8 kp=60u gamma=0.5 phi=0.7 tox=20n nsub=1e16 theta=0.06 eta=0.1 kappa=0.3 vmax=1.5e5 xj=0.2u ld=0.1u cgso=0.2n cgdo=0.2n cj=0.3m mj=0.5 cjsw=0.4n mjsw=0.33 pb=0.8
+.model p3 pmos level=3 vto=-0.9 kp=25u gamma=0.6 phi=0.7 tox=20n nsub=2e16 theta=0.08 eta=0.1 kappa=0.3 vmax=1.2e5 xj=0.2u ld=0.1u cgso=0.2n cgdo=0.2n cj=0.5m mj=0.5 cjsw=0.4n mjsw=0.33 pb=0.8
+.tran 0.05n 50n 0 0.05n
+.end

@@ -1,0 +1,11 @@
+BJT with bias-dependent transit time and IRB base resistance, AC gain
+* compare: vm(c) vp(c)
+VCC vcc 0 5
+VIN in 0 DC 0.78 AC 1
+RS in b 100
+RC vcc c 1k
+Q1 c b 0 sub qhf
+VSUB sub 0 0
+.model qhf npn is=1e-16 bf=120 nf=1 vaf=60 ikf=20m ise=2e-15 ne=1.5 br=2 nr=1 rb=300 irb=1m rbm=40 re=2 rc=30 cje=0.6p vje=0.85 mje=0.35 tf=0.2n xtf=4 vtf=3 itf=30m cjc=0.5p vjc=0.7 mjc=0.4 xcjc=0.6 tr=5n cjs=1p vjs=0.6 mjs=0.4
+.ac dec 10 1k 10g
+.end

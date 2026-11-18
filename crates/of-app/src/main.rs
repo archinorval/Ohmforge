@@ -5,11 +5,16 @@
 
 #[cfg(feature = "gui")]
 fn main() -> eframe::Result<()> {
-    eframe::run_native(
-        "Ohmforge",
-        eframe::NativeOptions::default(),
-        Box::new(|_cc| Ok(Box::new(App))),
-    )
+    let mut viewport = eframe::egui::ViewportBuilder::default();
+    // Window and taskbar icon (assets/icon-192.png); skipped if it fails to decode.
+    if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icon-192.png")) {
+        viewport = viewport.with_icon(icon);
+    }
+    let options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
+    eframe::run_native("Ohmforge", options, Box::new(|_cc| Ok(Box::new(App))))
 }
 
 #[cfg(feature = "gui")]
@@ -17,8 +22,8 @@ struct App;
 
 #[cfg(feature = "gui")]
 impl eframe::App for App {
-    fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
-        eframe::egui::CentralPanel::default().show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut eframe::egui::Ui, _frame: &mut eframe::Frame) {
+        eframe::egui::CentralPanel::default().show(ui, |ui| {
             ui.heading("Ohmforge");
             ui.label("ESP32 circuit simulator: pre-alpha scaffold.");
         });

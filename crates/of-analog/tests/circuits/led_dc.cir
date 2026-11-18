@@ -1,0 +1,9 @@
+LED (diode-based model) driven through a resistor
+* compare: v(a) i(v1)
+* ngspice-replace: led(is=1e-18 n=2 rs=8 wavelength=625n eqe=0.15) => d(is=1e-18 n=2 rs=8)
+V1 in 0 0
+R1 in a 150
+D1 a 0 red
+.model red led(is=1e-18 n=2 rs=8 wavelength=625n eqe=0.15)
+.dc V1 0 5 0.05
+.end

@@ -8,7 +8,8 @@ all-features = true
 allow = [
   "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause",
   "ISC", "Zlib", "Unicode-3.0", "MPL-2.0", "CC0-1.0", "BSL-1.0", "OFL-1.1", "Ubuntu-font-1.0",
-  "AGPL-3.0-or-later", "AGPL-3.0-only",
+  # Our own crates (license.workspace = AGPL-3.0-or-later); no dependency needs it.
+  "AGPL-3.0-or-later",
 ]
 confidence-threshold = 0.9
 # GPL and LGPL are rejected by omission.
@@ -20,6 +21,11 @@ allow-wildcard-paths = true
 
 [advisories]
 yanked = "deny"
+ignore = [
+  # paste is unmaintained but only a build-time proc-macro, pulled in by faer -> gemm;
+  # no safer alternative until faer drops it. Revisit when upgrading faer.
+  "RUSTSEC-2024-0436",
+]
 
 [sources]
 unknown-registry = "deny"

@@ -1,7 +1,12 @@
-//! Circuit graph: parts, pins and the nets that join them.
+//! Circuit graph, nets and the SPICE netlist reader.
 //!
-//! Later this crate partitions nets into digital-only nets (event-driven
-//! kernel) and mixed nets (promoted to the MNA analog solver).
+//! [`spice`] parses the ngspice-compatible netlist subset used by the analog
+//! solver and the `ohmforge run` command. Later this crate also partitions
+//! nets into digital-only nets (event-driven kernel) and mixed nets
+//! (promoted to the MNA analog solver).
+
+pub mod expr;
+pub mod spice;
 
 /// Index of a net. Net 0 is ground.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]

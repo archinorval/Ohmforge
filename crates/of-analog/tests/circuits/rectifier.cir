@@ -1,0 +1,11 @@
+Half-wave rectifier with reservoir capacitor
+* compare: v(out) i(v1)
+* tmax is set so that both simulators resolve the fast edges; the
+* comparison interpolates between output points.
+V1 in 0 SIN(0 10 50)
+D1 in out dmod
+R1 out 0 1k
+C1 out 0 100u
+.model dmod d is=2.52n n=1.752 rs=0.568 cjo=4p m=0.4 tt=20n
+.tran 50u 60m 0 10u
+.end

@@ -29,7 +29,7 @@ jobs:
         with: { targets: wasm32-unknown-unknown }
       - uses: Swatinem/rust-cache@v2
       # Simulation core crates must build for the web target.
-      - run: cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web
+      - run: cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web -p of-cpu-riscv -p of-components
   gui:
     runs-on: ubuntu-latest
     steps:
@@ -37,3 +37,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo check -p of-app --features gui
+  riscv-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # riscv-tests is BSD-3-Clause; built from a pinned commit, never committed.
+      - run: pip install ziglang
+      - run: scripts/build-riscv-tests.sh
+      - run: cargo test -p of-cpu-riscv --test riscv_tests -- --nocapture

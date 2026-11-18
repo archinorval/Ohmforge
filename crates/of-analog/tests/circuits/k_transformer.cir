@@ -1,0 +1,10 @@
+Coupled-inductor transformer with a resistive load
+* compare: v(sec) v(pri)
+V1 in 0 SIN(0 10 10k)
+RS in pri 10
+L1 pri 0 1m
+L2 sec 0 4m
+K1 L1 L2 0.95
+RL sec 0 500
+.tran 0.2u 300u 0 0.2u
+.end

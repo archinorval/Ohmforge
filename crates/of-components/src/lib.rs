@@ -1,4 +1,9 @@
-//! Built-in component models implemented in Rust.
+//! Built-in component models implemented in Rust, and the bridge from
+//! placed parts to the analog solver ([`analog`]).
+
+pub mod analog;
+
+pub use of_parts::Corner;
 
 use of_component_api::{Component, ComponentInfo};
 

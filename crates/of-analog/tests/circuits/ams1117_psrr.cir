@@ -1,0 +1,10 @@
+AMS1117-3.3 macromodel: ripple rejection, 22 uF tantalum (ESR 0.5 ohm), 0.5 A load
+* compare: vm(out) vp(out)
+.include ../../../../parts/regulators/ams1117/ams1117.lib
+VIN in 0 DC 6.3 AC 1
+XU1 in out 0 ams1117 rja=0.001
+RL out 0 6.6
+CO out co 22u
+RESR co 0 0.5
+.ac dec 10 10 1meg
+.end

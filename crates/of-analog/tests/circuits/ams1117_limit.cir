@@ -1,0 +1,8 @@
+AMS1117-3.3 macromodel: current limit, output forced from 0 V to 3.3 V at 5 V in
+* compare: i(vo)
+.include ../../../../parts/regulators/ams1117/ams1117.lib
+VIN in 0 5
+XU1 in out 0 ams1117 rja=0.001
+VO out 0 0
+.dc VO 0 3.3 0.02
+.end

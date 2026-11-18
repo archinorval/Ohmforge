@@ -1,0 +1,10 @@
+Level-1 NMOS switching a load through its gate capacitance (Meyer)
+* compare: v(d) v(g)
+VDD vdd 0 5
+VIN in 0 PULSE(0 5 5n 2n 2n 20n 50n)
+RG in g 20k
+RD vdd d 5k
+M1 d g 0 0 nm w=50u l=1u ad=100p as=100p pd=54u ps=54u
+.model nm nmos level=1 vto=0.8 kp=60u gamma=0.4 phi=0.6 lambda=0.03 tox=15n cgso=0.3n cgdo=0.3n cj=0.4m cjsw=0.3n mjsw=0.33 pb=0.8
+.tran 0.1n 100n 0 0.1n
+.end

@@ -1,0 +1,10 @@
+Series RLC with capacitor ESR/ESL and inductor winding resistance
+* compare: vm(m) vp(m) vm(in2) vp(in2)
+* ngspice-replace: L1 in2 m 10m rser=4 => L1 in2 lr 10m\nRL1 lr m 4
+* ngspice-replace: C1 m 0 1u esr=0.2 esl=5n => C1 m cx 1u\nRESR cx cy 0.2\nLESL cy 0 5n
+V1 in 0 DC 0 AC 1 30
+R1 in in2 50
+L1 in2 m 10m rser=4
+C1 m 0 1u esr=0.2 esl=5n
+.ac dec 20 100 100meg
+.end

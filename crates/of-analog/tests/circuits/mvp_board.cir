@@ -1,0 +1,33 @@
+MVP board (parts library values): USB 5 V ramp into an AMS1117-3.3, LED with series resistor on the rail and an NPN switch driven by a GPIO-like pulse
+* compare: v(vdd) v(led1a) v(led2a) v(b) i(vusb)
+* The switched LED's cathode floats while the transistor is off (only
+* leakage and gmin set it), so it is not compared.
+* POLY sources make ngspice use trtol=1; both runs use it, with a tighter
+* reltol so the start-up edge is resolved alike.
+* ngspice-replace: CIN usb 0 10u esr=0.01 esl=0.5n => CIN usb cin1 10u\nRCIN cin1 cin2 0.01\nLCIN cin2 0 0.5n
+* ngspice-replace: led(is=1e-18 n=2 rs=4 cjo=20p wavelength=625n eqe=0.15) => d(is=1e-18 n=2 rs=4 cjo=20p)
+.include ../../../../parts/regulators/ams1117/ams1117.lib
+* USB supply with 0.2 ohm of cable and connector resistance.
+VUSB vbus 0 PWL(0 0 1m 5)
+RUSB vbus usb 0.2
+CIN usb 0 10u esr=0.01 esl=0.5n
+XU1 usb vdd 0 ams1117
+COUT vdd co 22u
+RESR co 0 0.3
+* Power LED: 330 ohm from the rail.
+R1 vdd led1a 330
+D1 led1a 0 red
+* GPIO (0 to 3.3 V, 25 ohm) driving an NPN low-side switch for a second LED.
+* (Edges slowed to 10 us: the comparison interpolates between output points,
+* and at a 2 us step limit faster edges would be sampled too coarsely.)
+VGPIO g 0 PULSE(0 3.3 2m 10u 10u 1m 2m)
+RG g gp 25
+RB gp b 1k
+Q1 sw b 0 qn
+R2 vdd led2a 150
+D2 led2a sw red
+.model red led(is=1e-18 n=2 rs=4 cjo=20p wavelength=625n eqe=0.15)
+.model qn npn is=1e-14 bf=100 br=1 vaf=100 cje=5p cjc=3p tf=0.5n tr=50n rb=50
+.options trtol=1 reltol=1e-4
+.tran 5u 6m 0 2u
+.end

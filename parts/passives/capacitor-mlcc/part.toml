@@ -1,0 +1,35 @@
+# Generic multilayer ceramic capacitor; capacitance per placement.
+# ESR/ESL are typical small-case values; DC-bias derating is not modelled.
+[part]
+id = "generic.capacitor-mlcc"
+name = "Ceramic chip capacitor (X5R/X7R)"
+category = "passive/capacitor"
+model = "rust:capacitor"
+verification = "community"
+
+[[pin]]
+number = "1"
+name = "1"
+kind = "passive"
+[[pin]]
+number = "2"
+name = "2"
+kind = "passive"
+
+[electrical]
+rated_voltage = { typ = 25.0, unit = "V" }
+
+[analog]
+kind = "capacitor"
+pins = ["1", "2"]
+params = { capacitance = { typ = 100e-9, tol = 0.1, unit = "F" }, esr = { typ = 0.01, unit = "ohm" }, esl = { typ = 0.5e-9, unit = "H" } }
+
+[[variant]]
+label = "0603 X7R 100 nF 25 V (value per placement)"
+mpn = "CL10B104KA8NNNC"
+manufacturer = "Samsung Electro-Mechanics"
+footprint = "Capacitor_SMD:C_0603_1608Metric"
+
+[license]
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"

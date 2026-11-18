@@ -1,0 +1,11 @@
+Common-emitter amplifier bias point (2N3904-like model)
+* compare: v(b) v(c) v(e) i(vcc)
+VCC vcc 0 12
+R1 vcc b 47k
+R2 b 0 10k
+RC vcc c 3.9k
+RE e 0 1k
+Q1 c b e q3904
+.model q3904 npn is=6.734f bf=416.4 nf=1 vaf=74.03 ikf=66.78m ise=6.734f ne=1.259 br=.7371 nr=1 var=100 ikr=10m isc=0 nc=2 rb=10 rc=1 re=0.1 cje=4.493p mje=.2593 vje=.75 cjc=3.638p mjc=.3085 vjc=.75 tf=301.2p tr=239.5n fc=.5
+.op
+.end

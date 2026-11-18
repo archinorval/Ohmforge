@@ -1,0 +1,8 @@
+Diode forward I-V with series resistance
+* compare: v(d) i(v1)
+V1 a 0 DC 0
+R1 a d 10
+D1 d 0 dmod
+.model dmod d is=2.52n n=1.752 rs=0.568
+.dc V1 -2 5 0.05
+.end

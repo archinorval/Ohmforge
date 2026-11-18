@@ -1,0 +1,17 @@
+PNP and NPN saturated switches driven by a pulse
+* compare: v(cn) v(cp)
+* tmax is set so that both simulators resolve the fast edges; the
+* comparison interpolates between output points.
+VCC vcc 0 5
+VIN in 0 PULSE(0 5 1u 50n 50n 4u 10u)
+RB in bn 4.7k
+QN cn bn 0 qn
+RLN vcc cn 1k
+RBP vcc bp 10k
+RBP2 bp cn 4.7k
+QP cp bp vcc qp
+RLP cp 0 1k
+.model qn npn is=1e-14 bf=100 br=1 vaf=100 cje=5p cjc=3p tf=0.5n tr=50n rb=50
+.model qp pnp is=1e-14 bf=80 br=1 vaf=80 cje=5p cjc=4p tf=0.8n tr=60n rb=50
+.tran 20n 20u 0 2n
+.end

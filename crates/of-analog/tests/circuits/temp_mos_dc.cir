@@ -1,0 +1,9 @@
+Level-1 NMOS transfer characteristic at 120 C (mobility, VTO and PHI scaling)
+* compare: i(vd)
+VD d 0 3
+VG g 0 0
+M1 d g 0 0 nm w=10u l=1u
+.model nm nmos level=1 vto=0.8 kp=80u gamma=0.4 phi=0.7 lambda=0.02 tnom=27
+.temp 120
+.dc VG 0 4 0.05
+.end
