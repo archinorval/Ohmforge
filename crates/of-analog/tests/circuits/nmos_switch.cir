@@ -1,0 +1,14 @@
+NMOS low-side switch with RC load and overlap capacitances
+* compare: v(d) v(g)
+* tmax is set so that both simulators resolve the fast edges; the
+* comparison interpolates between output points.
+VDD vdd 0 5
+VG gin 0 PULSE(0 5 1u 20n 20n 3u 8u)
+RG gin g 1k
+RL vdd d 500
+CL d 0 200p
+M1 d g s 0 nsw w=200u l=2u
+RS s 0 1
+.model nsw nmos level=1 vto=1.5 kp=60u gamma=0.6 phi=0.65 lambda=0.01 rd=0.5 cgso=1n cgdo=0.5n
+.tran 10n 16u 0 2n
+.end

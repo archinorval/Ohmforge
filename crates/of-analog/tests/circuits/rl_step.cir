@@ -1,0 +1,7 @@
+RL step response
+* compare: v(a) i(l1)
+V1 in 0 PULSE(0 1 10n 1n 1n 10u 20u)
+R1 in a 100
+L1 a 0 100u
+.tran 20n 20u
+.end

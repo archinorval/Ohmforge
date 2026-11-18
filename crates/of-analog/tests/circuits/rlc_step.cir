@@ -1,0 +1,8 @@
+Series RLC, underdamped step
+* compare: v(c) i(l1)
+V1 in 0 PULSE(0 1 0 10n 10n 1 2)
+R1 in a 20
+L1 a c 1m
+C1 c 0 1u
+.tran 2u 2m
+.end

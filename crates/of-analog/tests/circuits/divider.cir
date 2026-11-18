@@ -1,0 +1,11 @@
+Resistive divider with a current source
+* compare: v(a) v(b) v(c) i(v1)
+V1 in 0 DC 12
+R1 in a 2k
+R2 a 0 1k
+R3 a b 3.3k
+R4 b 0 6.8k
+I1 0 c 2m
+R5 c b 470
+.op
+.end

@@ -1,0 +1,10 @@
+CMOS inverter transfer curve (level 1)
+* compare: v(out) i(vdd)
+VDD vdd 0 3.3
+VIN in 0 0
+MP out in vdd vdd pch w=20u l=1u
+MN out in 0 0 nch w=10u l=1u
+.model nch nmos level=1 vto=0.7 kp=110u gamma=0.4 phi=0.7 lambda=0.04
+.model pch pmos level=1 vto=-0.8 kp=50u gamma=0.5 phi=0.7 lambda=0.05
+.dc VIN 0 3.3 0.01
+.end
