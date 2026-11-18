@@ -644,23 +644,38 @@ fn vectored_mode_and_priority() {
 
 #[test]
 fn esp32c3_platform_lines() {
-    let (mut h, mut ram) = setup(
-        HartConfig {
-            reset_pc: BASE,
-            ..HartConfig::esp32c3()
-        },
-        &[NOP],
-    );
+    let c3 = HartConfig {
+        reset_pc: BASE,
+        ..HartConfig::esp32c3()
+    };
+    let (mut h, mut ram) = setup(c3.clone(), &[NOP, NOP]);
     h.csr_poke(MTVEC, HANDLER | 1);
-    h.csr_poke(MIE, 0xffff_ffff);
-    assert_eq!(h.csrs().mie, 0xffff_fffe);
+    // No mie on the C3: the interrupt controller gates lines, so only
+    // mstatus.MIE matters to the core.
+    assert!(!h.csr_poke(MIE, 0xffff_ffff));
+    h.set_interrupt_line(20, true);
+    h.step(&mut ram);
+    assert_eq!(h.pc(), BASE + 4, "mstatus.MIE = 0: not taken");
     h.csr_poke(MSTATUS, 8);
     h.set_interrupt_line(0, true); // line 0 does not exist on the C3
+    h.set_interrupt_line(20, false);
     h.step(&mut ram);
-    assert_eq!(h.pc(), BASE + 4);
+    assert_eq!(h.pc(), BASE + 8);
     h.set_interrupt_line(20, true);
     h.step(&mut ram);
     assert_eq!(h.pc(), HANDLER + 80);
+    assert_eq!(h.csrs().mcause, 0x8000_0014);
+    // csrr a0, mie / mip are illegal instructions on the C3.
+    for csr in [MIE, MIP] {
+        let (mut h, mut ram) = setup(c3.clone(), &[csrrs(10, csr, 0)]);
+        assert!(matches!(
+            h.step(&mut ram),
+            StepOutcome::Trapped {
+                cause: TrapCause::Exception(Exception::IllegalInstruction, _),
+                ..
+            }
+        ));
+    }
 }
 
 #[test]
