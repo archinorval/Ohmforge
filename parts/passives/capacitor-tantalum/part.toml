@@ -1,0 +1,36 @@
+# Solid tantalum capacitor, the output capacitor the AMS1117 datasheet
+# asks for (its ESR helps the regulator's loop stability).
+[part]
+id = "generic.capacitor-tantalum"
+name = "Tantalum chip capacitor 22 uF 16 V"
+category = "passive/capacitor"
+model = "rust:capacitor"
+verification = "community"
+
+[[pin]]
+number = "1"
+name = "+"
+kind = "passive"
+[[pin]]
+number = "2"
+name = "-"
+kind = "passive"
+
+[electrical]
+rated_voltage = { typ = 16.0, unit = "V" }
+
+[analog]
+kind = "capacitor"
+pins = ["+", "-"]
+note = "ESR is a typical B-case value; check the series datasheet (it varies with frequency and temperature)."
+params = { capacitance = { typ = 22e-6, tol = 0.1, unit = "F" }, esr = { typ = 0.3, min = 0.1, max = 1.0, unit = "ohm" } }
+
+[[variant]]
+label = "22 uF 16 V 10 % B case (3528)"
+mpn = "TAJB226K016RNJ"
+manufacturer = "KYOCERA AVX"
+footprint = "Capacitor_Tantalum_SMD:CP_EIA-3528-21_Kemet-B"
+
+[license]
+data = "CC-BY-4.0"
+artwork = "CC-BY-4.0"

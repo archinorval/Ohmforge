@@ -7,10 +7,35 @@ datasheet = "https://www.bosch-sensortec.com/products/environmental-sensors/humi
 model = "rust:bme280"          # or "wasm:bme280.wasm" or "spice:model.lib"
 verification = "datasheet"      # datasheet | bench-measured | community
 
+# Pins of the GY-BME280 breakout (the bare LGA package has 8 pins).
+[[pin]]
+number = "1"
+name = "VDD"
+kind = "power"
+[[pin]]
+number = "2"
+name = "GND"
+kind = "power"
+[[pin]]
+number = "3"
+name = "SCL"
+kind = "input"
+[[pin]]
+number = "4"
+name = "SDA"
+kind = "io"
+
 [electrical]
 vdd = { min = 1.71, typ = 3.3, max = 3.6, unit = "V" }
 idd_active = { typ = 3.6e-6, unit = "A", note = "1 Hz humidity + temperature" }
 i2c_addresses = [0x76, 0x77]
+
+# Supply load seen by the analog solver: the average 1 Hz current at 3.3 V
+# as an equivalent resistance. The I2C pins belong to the digital model.
+[analog]
+kind = "load"
+pins = ["VDD", "GND"]
+params = { voltage = 3.3, current = { typ = 3.6e-6, max = 714e-6, unit = "A", note = "typ: 1 Hz forced mode; max: peak during a pressure measurement" } }
 
 [[variant]]                     # what you actually buy
 label = "GY-BME280 breakout, 3.3 V"

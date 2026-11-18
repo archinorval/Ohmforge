@@ -1,0 +1,32 @@
+# Generic chip resistor. The resistance is chosen per placement
+# (`resistance = 330.0`); tolerance and tempco come from the variant.
+[part]
+id = "generic.resistor"
+name = "Chip resistor"
+category = "passive/resistor"
+model = "rust:resistor"
+verification = "datasheet"
+
+[[pin]]
+number = "1"
+name = "1"
+kind = "passive"
+[[pin]]
+number = "2"
+name = "2"
+kind = "passive"
+
+[analog]
+kind = "resistor"
+pins = ["1", "2"]
+params = { resistance = { typ = 1000.0, tol = 0.01, unit = "ohm" }, tc1 = { typ = 100e-6, unit = "1/K", note = "thick film, +/-100 ppm/K" } }
+
+[[variant]]
+label = "0603, 1 %, 100 mW, thick film (value per placement)"
+mpn = "RC0603FR-07*L"
+manufacturer = "Yageo"
+footprint = "Resistor_SMD:R_0603_1608Metric"
+
+[license]
+data = "CC-BY-4.0"
+artwork = "CC-BY-4.0"

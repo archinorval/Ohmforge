@@ -1,0 +1,41 @@
+# Small-signal NPN for switching LEDs and relays from a GPIO. Gummel-Poon
+# parameters are Ohmforge's own rounded values (hFE 100, about 0.5 ns
+# transit time, a few pF of junction capacitance), not a vendor model.
+[part]
+id = "generic.npn-small-signal"
+name = "Small-signal NPN transistor (MMBT3904 class)"
+category = "discrete/bjt"
+model = "rust:bjt"
+verification = "community"
+
+[[pin]]
+number = "1"
+name = "B"
+kind = "input"
+[[pin]]
+number = "2"
+name = "E"
+kind = "passive"
+[[pin]]
+number = "3"
+name = "C"
+kind = "passive"
+
+[electrical]
+vceo = { max = 40.0, unit = "V" }
+ic_max = { max = 0.2, unit = "A" }
+
+[analog]
+kind = "npn"
+pins = ["C", "B", "E"]
+params = { is = 1e-14, bf = 100.0, br = 1.0, vaf = 100.0, cje = 5e-12, cjc = 3e-12, tf = 0.5e-9, tr = 50e-9, rb = 50.0 }
+
+[[variant]]
+label = "SOT-23"
+mpn = "MMBT3904"
+manufacturer = "onsemi"
+footprint = "Package_TO_SOT_SMD:SOT-23"
+
+[license]
+data = "CC-BY-4.0"
+artwork = "CC-BY-4.0"

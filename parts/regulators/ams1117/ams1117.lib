@@ -1,0 +1,74 @@
+* AMS1117 1 A low-dropout regulator: Ohmforge macromodel (original work,
+* not a vendor model). Licence: CC-BY-4.0, like the rest of parts/.
+*
+* Built from standard SPICE primitives only (R, C, D, Q, M, E, G with
+* POLY), so ngspice runs it unchanged for validation. Targets the AMS1117
+* datasheet typical values at 25 °C (fixed versions): output 1.5 %,
+* dropout 1.1 V at 0.8 A, current limit 1.1 A at Vin - Vout = 1.5 V,
+* quiescent current 5 mA, line regulation 0.5 mV (1.5 V to 12 V of
+* headroom), load regulation 3 mV (0 to 0.8 A), ripple rejection about
+* 70 dB at 120 Hz with 22 uF.
+*
+* Ports: in, out, gnd (SOT-223 pins 3, 2, 1). Parameters:
+*   vout  output voltage (1.5, 1.8, 2.5, 2.85, 3.3, 5.0)
+*   tamb  ambient temperature (°C)
+*   rja   junction-to-ambient thermal resistance (K/W); SOT-223 on a small
+*         copper area is about 90 (estimate: set it for the board)
+*   cth   thermal capacitance (J/K), estimate (rja * cth ~ 4.5 s)
+*   tsd   thermal limit (°C), estimate (not in the datasheet)
+* The junction temperature is v(<instance>.tj) + tamb.
+.subckt ams1117 in out gnd params: vout=3.3 tamb=25 rja=90 cth=0.05 tsd=150
+.param rdiv=2.5k rcl=0.05
+* Quiescent (ground-pin) current: a depletion NMOS current regulator.
+Mq in gnd gnd gnd amsq w=100u l=10u
+* Band-gap reference with a small supply sensitivity (line regulation).
+Vref ref0 gnd 1.25
+Eline ref ref0 in gnd 1.8e-5
+* Feedback divider from the internal (die) output node.
+Rf1 outi fb {rdiv*(vout/1.25-1)}
+Rf2 fb gnd {rdiv}
+* Supply ripple feedthrough to the feedback node (ripple rejection falls
+* with frequency: about 72 dB at 120 Hz).
+Cff in fb 80p
+* Error amplifier: transconductance into a high-impedance node with a
+* dominant-pole capacitor, clamped to about -0.3..1.6 V.
+Gea gnd ea ref fb 1m
+Rea ea gnd 2meg
+Cea ea gnd 1n
+Vclo clo gnd 0.3
+Dclo clo ea amsd
+Vchi chi gnd 1
+Dchi ea chi amsd
+* Driver: the error amplifier's transistor pulls base current out of a
+* PNP from the input, which supplies the pass transistor's base.
+Ebuf eab gnd ea gnd 1
+Qg nb eab eg amss
+Reg eg gnd 500
+Rnb in nb 20k
+Qd b nb in amsp
+Rbe b e 2k
+* NPN pass transistor and current-sense resistor.
+Qp in b e amsn
+Rcl e outi {rcl}
+* Current limit: the amplified sense voltage turns on a transistor that
+* steals the pass transistor's base current.
+Ecl x outi e outi 21.7
+Rx x xb 1k
+Qcl b xb outi amss
+* Bond wire and lead resistance (outside the loop: load regulation).
+Rbond outi out 3.4m
+* Thermal network: pass-transistor power V(in,outi) * I(sense) heats tj
+* (1 V = 1 K above ambient); near tsd a transistor reduces the drive.
+Gpd 0 tj POLY(2) in outi e outi 0 0 0 0 {1/rcl}
+Rth tj 0 {rja}
+Cth tj 0 {cth}
+Ets ts1 0 tj 0 30m
+Vts ts ts1 {0.65-0.03*(tsd-tamb)}
+Rts ts tsb 10k
+Qts ea tsb gnd amss
+.model amsq nmos level=1 vto=-2 kp=220u lambda=0.004
+.model amsd d is=1e-14 n=1
+.model amsp pnp is=1e-14 bf=60 vaf=60 rb=50 rc=5 cje=2p cjc=2p tf=2n
+.model amsn npn is=2e-12 bf=120 vaf=80 rb=2 re=0.22 rc=0.1 ikf=3 cje=60p cjc=30p tf=10n
+.model amss npn is=1e-14 bf=150 vaf=100
+.ends ams1117
