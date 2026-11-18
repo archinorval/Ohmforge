@@ -1,22 +1,22 @@
 # Roadmap and task list
 
-Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified and all checks in `AGENTS.md` pass; `[~]` means done in the working tree but not yet committed (awaiting Stefan's approval). Status as of 18 November 2026.
+Derived from `docs/DESIGN_AND_PLAN.md` section 14. Tick a box only when the work is verified and all checks in `AGENTS.md` pass; `[~]` means done in the working tree but not yet committed. Status as of 18 November 2026.
 
-**Current phase: P1 Analog core** (`crates/of-analog`, `of-netlist::spice`, `ohmforge run`). Phase one (the RISC-V CPU core for the ESP32-C3, pulled forward from P2) is done in the working tree. P0 leftovers continue alongside.
+**Current phase: P1 Analog core is complete; next is P2** (ESP32-C3 SoC on the RISC-V core, co-simulated with the analog solver through the `of-core` kernel). Phase one (the RISC-V CPU core, pulled forward from P2) is done. P0 leftovers continue alongside.
 
 ## Phase one: RISC-V CPU core (`of-cpu-riscv`)
 
-Status: the core is implemented and tested (62 unit tests, 1 doc test, 75 of 77 riscv-tests passing, 2 expected-unsupported). Design notes: `AGENTS.md` section 3a.
+Status: done; the core is implemented and tested (62 unit tests, 1 doc test, 75 of 77 riscv-tests passing, 2 expected-unsupported). Design notes: `AGENTS.md` section 3a.
 
-- [~] `Bus` trait (sizes, access kinds, wait states, custom CSR hooks, sync requests) and a `Ram` device
-- [~] RV32I decoder and disassembler; RVC expander (all RV32C forms, reserved encodings rejected)
-- [~] Execution of RV32I, M, A (optional, off on the C3) and C; Zicsr; Zifencei (`fence.i` as a no-op)
-- [~] Machine-mode CSRs: `mstatus`, `misa`, `mie`/`mip`, `mtvec` (direct and vectored), `mscratch`, `mepc`, `mcause`, `mtval`, `mcycle[h]`, `minstret[h]`, `mcountinhibit`, ID CSRs, user counter shadows
-- [~] Exceptions (misaligned, access fault, illegal, breakpoint, ecall) and interrupts with ESP32-C3 line mask; `wfi`
-- [~] Cycle model (`TimingModel`, uncalibrated C3 estimates) and `SimTime` mapping (`run_until`, `idle_until`, `local_time`)
-- [~] Debugger API: `step`, `run`, breakpoints, halt/resume/reset, register/CSR access, `disassemble_at`
-- [~] riscv-tests harness (`tests/riscv_tests.rs`) and build scripts (`scripts/build-riscv-tests.sh` / `.ps1`), CI job
-- [ ] Engine adapter: implement the `of-core` engine trait so the scheduler drives the hart in quanta (needs the P0 engine trait)
+- [x] `Bus` trait (sizes, access kinds, wait states, custom CSR hooks, sync requests) and a `Ram` device
+- [x] RV32I decoder and disassembler; RVC expander (all RV32C forms, reserved encodings rejected)
+- [x] Execution of RV32I, M, A (optional, off on the C3) and C; Zicsr; Zifencei (`fence.i` as a no-op)
+- [x] Machine-mode CSRs: `mstatus`, `misa`, `mie`/`mip`, `mtvec` (direct and vectored), `mscratch`, `mepc`, `mcause`, `mtval`, `mcycle[h]`, `minstret[h]`, `mcountinhibit`, ID CSRs, user counter shadows
+- [x] Exceptions (misaligned, access fault, illegal, breakpoint, ecall) and interrupts with ESP32-C3 line mask; `wfi`
+- [x] Cycle model (`TimingModel`, uncalibrated C3 estimates) and `SimTime` mapping (`run_until`, `idle_until`, `local_time`)
+- [x] Debugger API: `step`, `run`, breakpoints, halt/resume/reset, register/CSR access, `disassemble_at`
+- [x] riscv-tests harness (`tests/riscv_tests.rs`) and build scripts (`scripts/build-riscv-tests.sh` / `.ps1`), CI job
+- [ ] Engine adapter: implement the `of-core` `Engine` trait so the kernel drives the hart in quanta (the trait and kernel now exist; register the CPU before the analog engine)
 - [ ] `of-soc-esp32c3`: memory map bus (IROM/DROM via flash cache, IRAM/DRAM, ROM, peripherals) on top of `Bus`
 - [ ] ESP32-C3 custom CSRs (e.g. performance counters `mpcer`/`mpcmr`/`mpccr`, GPIO CSRs) through `Bus::csr_read`/`csr_write`
 - [ ] Interrupt matrix model feeding `set_interrupt_lines` (priority, threshold, edge/level)
@@ -34,10 +34,10 @@ Status: the core is implemented and tested (62 unit tests, 1 doc test, 75 of 77 
 - [x] rustfmt, clippy, cargo-deny and toolchain configuration
 - [x] CI workflow file (inert until pushed)
 - [x] Example part (`parts/sensors/bosch-bme280/part.toml`) parsed by `of-parts`
-- [~] Agent guides (`AGENTS.md`, `.grok/rules/`, this roadmap)
-- [~] GUI scaffold ported to eframe 0.37 (`App::ui`) with X11/Wayland backends so the Linux CI GUI check builds
+- [x] Agent guides (`AGENTS.md`, `.grok/rules/`, this roadmap)
+- [x] GUI scaffold ported to eframe 0.37 (`App::ui`) with X11/Wayland backends so the Linux CI GUI check builds
 - [ ] `of-core`: scheduler snapshot/restore and replay log
-- [ ] `of-core`: engine trait (`advance_to(t) -> next_event`) used by all engines
+- [x] `of-core`: `Engine` trait (`advance_to(limit, ctx) -> reached`, `next_event`, `on_event`) and `Kernel` (quantum slices, events, breakpoints, host stops); used by the analog engine, CPU adapter next
 - [ ] Project file format v0 (`project.toml` + circuit file) with serde round-trip tests
 - [ ] `of-parts`: JSON Schema generation (schemars) and a validator command in `of-cli`
 - [ ] `of-cli`: `ohmforge validate-parts parts/`
@@ -47,33 +47,37 @@ Status: the core is implemented and tested (62 unit tests, 1 doc test, 75 of 77 
 
 ## P1 Analog core (weeks 4 to 16)
 
-Status: the SPICE-grade solver is committed (`of-analog`, `of-netlist::spice`, `ohmforge run`); the deferred P1 models and analyses below are done in the working tree. `of-analog` has 21 unit tests, 29 analytic tests, 1 doc test and an ngspice reference set of 32 circuits (64 signals: OP, DC, nested DC, AC magnitude/phase and transient) all within 1 %; `of-netlist` has 7 tests. Design notes: `AGENTS.md` section 3b.
+Status: done. `of-analog` has 22 unit tests, 29 analytic tests, 3 engine tests, 1 doc test and an ngspice reference set of 39 circuits (80 signals: OP, DC, nested DC, AC magnitude/phase and transient, including the AMS1117 macromodel and the MVP board) all within 1 %; `of-netlist` has 8 tests, `of-parts` 4, `of-core` 6, and `of-components` 15 (parts bridge, AMS1117 datasheet checks, the MVP board from parts against ngspice, and a scripted-CPU co-simulation). Design notes: `AGENTS.md` section 3b.
 
-- [~] SPICE netlist subset parser (`of-netlist::spice`): R C L V I E G F H D Q M, `.model`, `.subckt`/`X` flattening, `.param` constants, `.include`, `.options`, `.ic`, `.op`, `.dc`, `.tran`
-- [~] Netlist builder (`of_analog::netlist::build`): deck to MNA unknowns, ground handling, voltage-source and inductor branches, clear errors and unsupported-parameter warnings
-- [~] Sparse MNA with faer sparse LU: pattern built once, symbolic factorisation reused, refactorisation skipped when the matrix is unchanged (linear fast path)
-- [~] R, C, L (with `ic=`), independent V/I sources (DC, PULSE, SIN, EXP, PWL) and linear controlled sources E/G/F/H
-- [~] DC operating point: Newton-Raphson with pnjlim/fetlim/limvds, then damped Newton, gmin stepping and source stepping; DC sweeps with warm starts
-- [~] Transient: trapezoidal (default) and variable-step Gear-2, charge-based LTE step control (SPICE `CKTterr`), exact breakpoints at source corners, `uic`
-- [~] Diode: Shockley with emission coefficient, series R, depletion and diffusion charge, breakdown (`BV`/`IBV`)
-- [~] BJT: Gummel-Poon subset (IS BF BR NF NR VAF VAR IKF IKR ISE NE ISC NC RB RC RE CJE VJE MJE CJC VJC MJC TF TR FC)
-- [~] MOSFET level 1 (Shichman-Hodges) with body effect, channel-length modulation, RD/RS, bulk diodes and overlap capacitances
-- [~] `ohmforge run netlist.cir [--out x.csv] [--vcd x.vcd]`
-- [~] ngspice comparison suite (`tests/ngspice_compare.rs`, golden CSVs generated by `scripts/gen-ngspice-golden.sh`, ngspice used only as an external program): all within 1 % of span
-- [~] MOSFET Meyer gate capacitances (TOX) and bulk junction capacitances (CBD/CBS, CJ/CJSW with AD/AS/PD/PS, MJ/MJSW/PB/FC, JS)
-- [~] MOSFET level 3 (SPICE semi-empirical: ETA, THETA, KAPPA, VMAX, XJ, DELTA, NFS, NSUB-derived parameters), exact derivatives via dual numbers; EKV-lite not planned
-- [~] BJT extras: XTF/VTF/ITF transit-time modulation, IRB/RBM, CJS substrate cap (4th node), XCJC split, excess phase (PTF, transient), temperature (TEMP/TNOM, XTI/EG/XTB); gmin on the leakage diodes only, as SPICE
-- [~] Temperature for diodes (IS, junction potential and CJO, BV with TCV, NBV) and MOSFETs (KP/U0, PHI, VTO, IS/JS, bulk caps); `.temp`, `.options temp/tnom`, instance `temp`/`dtemp`
-- [~] Coupled inductors (`K`), switches (`S`/`W`, SW/CSW models with hysteresis), LED model (`.model x led(vf if n rs wavelength eqe)` with `popt()` and `bright()` probes), capacitor ESR/ESL, inductor `rser`, `tc1`/`tc2` tempcos and stored `tol=`
-- [~] `.ac` small-signal analysis (dec/oct/lin, complex MNA on the same sparse pattern, magnitude/phase output); nested `.dc`; `.param` expressions with functions; subcircuit parameters and subcircuit-local `.model`/`.param`
+- [x] SPICE netlist subset parser (`of-netlist::spice`): R C L V I E G F H D Q M, `.model`, `.subckt`/`X` flattening, `.param` constants, `.include`, `.options`, `.ic`, `.op`, `.dc`, `.tran`
+- [x] Netlist builder (`of_analog::netlist::build`): deck to MNA unknowns, ground handling, voltage-source and inductor branches, clear errors and unsupported-parameter warnings
+- [x] Sparse MNA with faer sparse LU: pattern built once, symbolic factorisation reused, refactorisation skipped when the matrix is unchanged (linear fast path)
+- [x] R, C, L (with `ic=`), independent V/I sources (DC, PULSE, SIN, EXP, PWL) and linear controlled sources E/G/F/H
+- [x] DC operating point: Newton-Raphson with pnjlim/fetlim/limvds, then damped Newton, gmin stepping and source stepping; DC sweeps with warm starts
+- [x] Transient: trapezoidal (default) and variable-step Gear-2, charge-based LTE step control (SPICE `CKTterr`), exact breakpoints at source corners, `uic`
+- [x] Diode: Shockley with emission coefficient, series R, depletion and diffusion charge, breakdown (`BV`/`IBV`)
+- [x] BJT: Gummel-Poon subset (IS BF BR NF NR VAF VAR IKF IKR ISE NE ISC NC RB RC RE CJE VJE MJE CJC VJC MJC TF TR FC)
+- [x] MOSFET level 1 (Shichman-Hodges) with body effect, channel-length modulation, RD/RS, bulk diodes and overlap capacitances
+- [x] `ohmforge run netlist.cir [--out x.csv] [--vcd x.vcd]`
+- [x] ngspice comparison suite (`tests/ngspice_compare.rs`, golden CSVs generated by `scripts/gen-ngspice-golden.sh`, ngspice used only as an external program): all within 1 % of span
+- [x] MOSFET Meyer gate capacitances (TOX) and bulk junction capacitances (CBD/CBS, CJ/CJSW with AD/AS/PD/PS, MJ/MJSW/PB/FC, JS)
+- [x] MOSFET level 3 (SPICE semi-empirical: ETA, THETA, KAPPA, VMAX, XJ, DELTA, NFS, NSUB-derived parameters), exact derivatives via dual numbers; EKV-lite not planned
+- [x] BJT extras: XTF/VTF/ITF transit-time modulation, IRB/RBM, CJS substrate cap (4th node), XCJC split, excess phase (PTF, transient), temperature (TEMP/TNOM, XTI/EG/XTB); gmin on the leakage diodes only, as SPICE
+- [x] Temperature for diodes (IS, junction potential and CJO, BV with TCV, NBV) and MOSFETs (KP/U0, PHI, VTO, IS/JS, bulk caps); `.temp`, `.options temp/tnom`, instance `temp`/`dtemp`
+- [x] Coupled inductors (`K`), switches (`S`/`W`, SW/CSW models with hysteresis), LED model (`.model x led(vf if n rs wavelength eqe)` with `popt()` and `bright()` probes), capacitor ESR/ESL, inductor `rser`, `tc1`/`tc2` tempcos and stored `tol=`
+- [x] `.ac` small-signal analysis (dec/oct/lin, complex MNA on the same sparse pattern, magnitude/phase output); nested `.dc`; `.param` expressions with functions; subcircuit parameters and subcircuit-local `.model`/`.param`
+- [x] POLY(n) E/G sources (SPICE2 term order, exact Jacobian), used by the regulator thermal network
+- [x] Bridge from `of-components` parts to `of-analog` devices (`of_components::analog`): `part.toml` `[[pin]]` and `[analog]` sections, pin mapping, typical/min/max/deviation corners from tolerances, placement overrides, subcircuit parts flattened per instance, SPICE export (`to_spice`); parts: resistor, MLCC, tantalum capacitor, red 0603 LED, small-signal NPN, AMS1117-3.3, BME280 supply load
+- [x] Engine adapter for the `of-core` kernel (`of_analog::AnalogEngine`): sliced transient keeping integration history, parameter-change events, `PinDriver` GPIO outputs, threshold watches that post interrupts at the exact crossing, breakpoints and host stops
+- [x] AMS1117-3.3 macromodel (`parts/regulators/ams1117/ams1117.lib`, standard primitives only): dropout, quiescent current, line/load regulation, current limit, ripple rejection, load-step response, junction temperature with thermal limit; checked against the datasheet and ngspice
+- [x] MVP analog checks: LED with series resistor, transistor switch and AMS1117 (the `mvp_board` circuit, also built from parts) within 1 % of ngspice
 - [ ] Switch timestep control near thresholds (ngspice `SWtrunc`), BJT excess phase in `.ac`, `.noise`/`.tf`/`.sens`, `.step`/Monte Carlo using `tol=`
-- [ ] Bridge from `of-components` parts to `of-analog` devices (schematic to MNA without a SPICE deck)
-- [ ] Engine adapter for the `of-core` scheduler (`advance_to(t) -> next_event`) and latent-subcircuit bypass
-- [ ] MVP analog checks: LED with series resistor, transistor switch and AMS1117 macromodel within 1 % of ngspice
+- [ ] Latent-subcircuit bypass (skip converged, quiescent subcircuits) for speed
+- [ ] AMS1117-ADJ variant; junction temperature feeding back into device temperatures (electro-thermal coupling)
 
 ## P2 ESP32-C3 MVP (weeks 12 to 28)
 
-- [~] RV32IMC interpreter passing riscv-tests (see phase one; riscv-arch-test still to do)
+- [x] RV32IMC interpreter passing riscv-tests (see phase one; riscv-arch-test still to do)
 - [ ] ELF loading (`object`, `gimli`), flash image layout, ROM from esp-rom-elfs
 - [ ] C3 memory map, interrupt matrix, systimer, timer groups, UART
 - [ ] GPIO/IOMUX with electrical pin model (drive strength, thresholds, pulls)
@@ -87,7 +91,7 @@ Status: the SPICE-grade solver is committed (`of-analog`, `of-netlist::spice`, `
 
 - [ ] Unmodified ESP32-C3 ELF (Arduino-ESP32, ESP-IDF or esp-hal) boots from the real ROM
 - [ ] Blink, button with interrupt, potentiometer into ADC, LED dimming via LEDC behave as on hardware
-- [ ] RC filter, LED with series resistor, transistor switch, AMS1117 regulator within 1 % of ngspice
+- [x] RC filter, LED with series resistor, transistor switch, AMS1117 regulator within 1 % of ngspice
 - [ ] Oscilloscope, logic analyser with UART decode, multimeter probe, serial monitor
 - [ ] BOM CSV export with MPNs, supplier links and ZAR cost, plus build checklist
 - [ ] Desktop builds on Windows, macOS, Linux; deterministic headless runs in CI
@@ -98,7 +102,7 @@ Status: the SPICE-grade solver is committed (`of-analog`, `of-netlist::spice`, `
 - [ ] Peripherals: I2C, SPI, RMT, DAC (C3 and classic ESP32)
 - [ ] Breadboard view alongside the schematic editor
 - [ ] Parts library to about 50 parts (sensors, displays, drivers, regulators), each with a `part.toml`, behaviour and tests
-- [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (AMS1117, LM358, TL431)
+- [ ] Op-amp, comparator and regulator macromodels and `.subckt` import (LM358, TL431; AMS1117 done in P1)
 - [ ] Electromechanical parts: DC motor with back-EMF and inertia, relay coil and contacts, servo
 - [ ] KiCad schematic/netlist export (`of-kicad`) and XLSX BOM export
 - [ ] Release 0.2

@@ -8,9 +8,9 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 
 **Source of truth:** [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md). Read it before planning anything non-trivial. If your change contradicts it, stop and propose an update to the plan (or an RFC in `rfcs/`) instead of silently diverging. Do not edit `docs/DESIGN_AND_PLAN.md` unless the owner asks.
 
-**Current status and next tasks:** [`docs/ROADMAP.md`](docs/ROADMAP.md). Pick work from the current phase, tick boxes only when the work is verified (and committed once Stefan approves), and keep that file up to date.
+**Current status and next tasks:** [`docs/ROADMAP.md`](docs/ROADMAP.md). Pick work from the current phase, tick boxes only when the work is verified and committed, and keep that file up to date.
 
-**Current phase: P1 Analog core** (`crates/of-analog`, the SPICE parser in `of-netlist::spice`, `ohmforge run`). The solver is implemented and matches ngspice within 1 % on the reference set; next are MOSFET capacitances and level 3, `.ac`, and wiring parts and the scheduler to it (section 3b). Phase one, the RISC-V CPU core (`crates/of-cpu-riscv`, for the ESP32-C3), is implemented and passes the official riscv-tests (section 3a). See the roadmap for the checklists.
+**Current phase: P1 Analog core is complete; P2 (ESP32-C3 MVP) is next.** The solver (`crates/of-analog`, the SPICE parser in `of-netlist::spice`, `ohmforge run`) matches ngspice within 1 % on the reference set; parts are bridged to solver devices (`of_components::analog`), the solver runs under the `of-core` kernel (`of_analog::AnalogEngine`), and an AMS1117-3.3 macromodel and the MVP board checks are in (section 3b). Phase one, the RISC-V CPU core (`crates/of-cpu-riscv`, for the ESP32-C3), passes the official riscv-tests (section 3a). The next step is the hart's `Engine` adapter and `of-soc-esp32c3`. See the roadmap for the checklists.
 
 ## 2. Architecture in one minute
 
@@ -24,13 +24,13 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 
 | Crate | Responsibility | State |
 |---|---|---|
-| `of-core` | Virtual time, deterministic scheduler, events | Working stub + tests |
+| `of-core` | Virtual time, deterministic scheduler, events; `Engine` trait and `Kernel` (quantum slices, breakpoints, host stops) | Implemented + tests |
 | `of-netlist` | Circuit graph, nets, analog/digital partitioning; SPICE netlist subset parser (`spice`) | Net types; SPICE parser implemented |
-| `of-analog` | MNA, Newton-Raphson, sparse LU (faer), trapezoidal/Gear-2, LTE timestep, device models | Implemented: DC op, DC sweeps (nested), AC, transient; R C L K V I E G F H S W, diode/LED, BJT (full SPICE3 Gummel-Poon), MOSFET L1/L3 with Meyer caps; temperature; ngspice-checked |
+| `of-analog` | MNA, Newton-Raphson, sparse LU (faer), trapezoidal/Gear-2, LTE timestep, device models | Implemented: DC op, DC sweeps (nested), AC, transient; R C L K V I E G F H (incl. POLY) S W, diode/LED, BJT (full SPICE3 Gummel-Poon), MOSFET L1/L3 with Meyer caps; temperature; `PinDriver`; `AnalogEngine` for the kernel; ngspice-checked |
 | `of-digital` | 4-state event-driven logic kernel | Logic type + test |
 | `of-component-api` | Stable `Component` trait, `Health`, `FaultKind` | Draft API |
-| `of-components` | Built-in part models | Resistor stub |
-| `of-parts` | `part.toml` schema and loader | Working + test on example part |
+| `of-components` | Built-in part models; `analog`: parts-to-devices bridge (`Library`, `Board`, `build`, `to_spice`) | Bridge implemented + tests |
+| `of-parts` | `part.toml` schema (pins, `[analog]`, tolerances/corners) and loader | Implemented + tests |
 | `of-cpu-riscv` | RV32IMC(+A) core, Zicsr, M-mode traps/interrupts, cycle timing, debugger API | Implemented: 62 unit tests, 75/77 riscv-tests |
 | `of-cpu-xtensa` | Xtensa LX6/LX7 core (phase 4) | Empty |
 | `of-cpu-qemu-ipc` | MIT/Apache client for the out-of-process QEMU sidecar | Empty |
@@ -61,15 +61,19 @@ Internal dependencies point downwards only: `of-core` depends on nothing interna
 
 ## 3b. `of-analog` design notes
 
-- **Modules:** `matrix` (sparse MNA system on faer sparse LU, plus the complex AC solve), `circuit` (`Circuit`, `Device` trait, `Setup`, `LoadCtx`), `devices` (`passive` incl. `MutualInductance`, `sources`, `switch`, `diode` incl. LED, `bjt`, `mosfet`, `limit` incl. temperature helpers), `integrate` (`Method`, `States`, `Integrator`), `waveform` (PULSE/SIN/EXP/PWL), `analysis` (`dc` incl. `dc_sweep_nested`, `ac`, `newton`, `tran`), `results` (`OpPoint`, `Waveforms`, `AcResult`, CSV/VCD), `netlist` (`build(&Deck)`).
+- **Modules:** `matrix` (sparse MNA system on faer sparse LU, plus the complex AC solve), `circuit` (`Circuit`, `Device` trait, `Setup`, `LoadCtx`), `devices` (`passive` incl. `MutualInductance`, `sources`, `switch`, `diode` incl. LED, `bjt`, `mosfet`, `limit` incl. temperature helpers), `integrate` (`Method`, `States`, `Integrator`), `waveform` (PULSE/SIN/EXP/PWL), `analysis` (`dc` incl. `dc_sweep_nested`, `ac`, `newton`, `tran`), `results` (`OpPoint`, `Waveforms`, `AcResult`, CSV/VCD), `netlist` (`build(&Deck)`, `add_deck` to add a deck to an existing circuit), `engine` (`AnalogEngine`).
 - **Unknowns:** variable 0 is ground; node voltages first, then internal nodes (`v(dev#suffix)`, for RS/RB/RD, ESR/ESL, `rser` etc.) and branch currents `i(name)` for V sources, inductors, E and H (internal branches such as `i(c1#esl)` are hidden). Output omits internal nodes. Current signs follow SPICE: `i(v1)` flows into the + terminal.
 - **Device contract:** `setup` claims matrix slots (`Setup::slot`/`slots2`), branches, internal nodes and state slots once; `load` stamps the Newton companion model every iteration (matrix entries plus RHS `i - g*v`). Charges are integrated via `LoadCtx::integrate(k, cap)`, which marks state `k` for the truncation-error estimate. Devices report limiting (`cx.limited`) so the iteration is not counted as converged, and `next_breakpoint` for source corners. Optional hooks: `ac_stimulus` (AC sources) and `probes` (derived outputs such as an LED's `popt(d1)` in W and `bright(d1)` = I/IF, appended to OP and sweep results). Setup priority: 0 for branch owners, 1 default, 2 for `K` (needs both inductor branches).
 - **Matrix:** pattern fixed at `finalize`; symbolic LU computed once; numeric refactorisation skipped when values are unchanged (linear circuits after the first step). No rayon: single-threaded and deterministic, wasm32-friendly. A non-finite solution is reported as a singular matrix naming the suspect unknown.
 - **DC:** Newton (`itl1`) with SPICE3 pnjlim/fetlim/limvds, then damped Newton, gmin stepping (diagonal shunt from `gmin*10^10` down by decades, with back-off) and source stepping (both use `itl2`, as in SPICE). The transient operating point uses waveform values at t = 0; `.op` uses the DC value. Nested `.dc` restarts the inner sweep for each outer value and adds a column named after the outer source.
 - **AC:** after the DC operating point and a `TranInit` load, every device is loaded in `Mode::Tran` with `small_signal = true` (no limiting, no state advance) using `Integrator::small_signal(ag0)`: `ag0 = 0` gives G and `ag0 = 1` gives G + C, so C is the difference on the same CSC pattern. Each frequency solves `(G + jωC) x = b` with the cached symbolic LU. Devices need no AC-specific code, but must stamp operating-point capacitances when `small_signal` is set (MOSFET Meyer uses 2x the half-cap, as SPICE's INITSMSIG). BJT excess phase is transient-only.
-- **Transient:** first step and the step after every breakpoint are backward Euler, then trapezoidal or Gear-2 (`.options method=gear`). Step control is the SPICE3 `CKTterr` charge-based estimate (divided differences of every integrated charge, `trtol` 7, `chgtol` 1e-14); reject below 0.9 h, grow at most 2x; Newton failure divides h by 8. Max step `min(tstep, span/50)` unless `tmax` is given. Breakpoints land exactly; after one, h = 0.1 x min(h, gap to the next). `Integrator::h_prev` is the previous step (BJT excess phase). Switches have no timestep control yet: give switching circuits a `tmax`.
+- **Transient:** first step and the step after every breakpoint are backward Euler, then trapezoidal or Gear-2 (`.options method=gear`). Step control is the SPICE3 `CKTterr` charge-based estimate (divided differences of every integrated charge, `trtol` 7, `chgtol` 1e-14); reject below 0.9 h, grow at most 2x; Newton failure divides h by 8. Max step `min(tstep, span/50)` unless `tmax` is given. Breakpoints land exactly; after one, h = 0.1 x min(h, gap to the next). `Integrator::h_prev` is the previous step (BJT excess phase). Switches have no timestep control yet: give switching circuits a `tmax`. The step loop is `analysis::tran::Stepper`, shared by `transient()` and the engine.
 - **Models** follow the published SPICE3/ngspice equations: diode (Shockley, breakdown knee with NBV/TCV, depletion/diffusion charge); Gummel-Poon BJT (`qb` with Early and high injection, XTF/VTF/ITF, IRB/RBM, XCJC, CJS to the substrate node, PTF excess phase); MOS1 Shichman-Hodges and MOS3 (ngspice's corrected form, i.e. not `badmos3`) with mode swap, bulk diodes and depletion caps, Meyer caps from TOX; SW/CSW switches with hysteresis; `K` as `M = k·sqrt(L1·L2)`. Temperature: devices take `with_temp(K)`; the builder uses `.temp`/`.options temp` (°C, default 27), `.options tnom`, model `tnom` and instance `temp`/`dtemp`; passives scale by `1 + tc1·dT + tc2·dT²`. Missing MOS KP/PHI/GAMMA/VTO are derived from TOX/UO/NSUB/NSS/TPG as in SPICE. Unsupported model parameters produce a build warning, never silent wrong results; MOSFET `LEVEL` other than 1 or 3 is an error.
-- **Validation:** `tests/analytic.rs` (closed-form answers) and `tests/ngspice_compare.rs` (circuits in `tests/circuits`, golden CSVs in `tests/golden`, regenerated with `scripts/gen-ngspice-golden.sh [name ...]`). ngspice is run only as an external program to produce data: never link, vendor, port or ship it (its tree contains a GPL file). Ohmforge-only syntax (ESR/ESL, `rser`, `led` models) is rewritten for the reference run with `* ngspice-replace: FROM => TO` lines. Limits: 1 % of the reference signal's span (tran/DC); AC magnitude 1 % per point (floor 1e-3 of the peak) and phase 1 % of 180°; nested DC row by row. Fast-edge circuits set `tmax` so both simulators resolve the edges.
+- **Engine (`AnalogEngine`, kernel side in `of_core::engine`):** the kernel cuts time into slices ending at the earliest of now + quantum, the next event, breakpoint, the run end and every engine's `next_event`; engines advance in registration order and an early stop shrinks the slice for the later ones, so **register CPUs first and the analog engine last** (a CPU may run up to one quantum ahead; MMIO accesses end its quantum). The analog engine keeps integration history across slices (no restart at slice ends); events map codes to `SetParam` changes (`on_code`) and force a backward-Euler restart (`discontinuity`); `watch(signal, level, edge, target, code)` refines the step down to the crossing within `EngineConfig::resolution` (100 ps default) and posts an event at that time. GPIO outputs are `PinDriver`s (Norton source, `v`/`r` parameters, Hi-Z = 1 TΩ). `value(name)` reads any unknown or probe; `record` keeps `Waveforms`.
+- **POLY sources:** `E`/`G` with `POLY(n)` (n ≤ 8) use the SPICE2 term order (constant, linear, then products by degree in lexicographic index order) with the exact Jacobian. ngspice accepts them natively, but its XSPICE code drops `trtol` to 1 when they are present, so golden decks using them set `.options trtol=1`.
+- **Parts bridge (`of_components::analog`):** a `part.toml` gives `[[pin]]` (number, name) and `[analog]` (`kind` = resistor, capacitor, led, diode, npn, pnp, nmos, pmos, load or subckt; `pins` in device order; `params` as plain values or `{ value/typical, min, max, tolerance }`; `file`/`subckt` for subcircuit parts). `Placement::new(refdes, part, &[(pin, net)])` with `.with(param, value)` overrides; a `Board` has placements, a `Corner` (Typical, Min, Max, Deviation(k)) and `Env` (temp/tnom). Overrides keep the part's relative spread at a corner. Primitive parts become devices named by lower-case refdes; subcircuit parts are flattened per instance as `x<refdes>` (so `v(xu1.tj)`); net `0`/`gnd` is ground; every pin must be connected. `to_spice` writes the same board as a SPICE deck. Ground truth for new analog parts: a datasheet test through the bridge plus an ngspice golden circuit.
+- **AMS1117 macromodel** (`parts/regulators/ams1117/ams1117.lib`, our own, CC-BY-4.0): standard primitives only (depletion-NMOS quiescent current, ideal reference with supply coupling, Gm error amplifier with clamps, PNP driver into an NPN pass device, sense resistor and current limiter, POLY power into an `Rth`/`Cth` thermal node with a thermal limit near `tsd`). `v(x.tj)` is the rise over `tamb`. Matches the datasheet (Vout, line/load regulation, Iq ≈ 5 mA, dropout ≈ 1.1 V at 0.8 A, limit ≈ 1.1 A, ripple rejection ≈ 72 dB at 120 Hz) and ngspice (`ams1117_*` circuits). Not modelled: the ADJ variant, behaviour below about 1.5 V in, and electro-thermal coupling into other devices.
+- **Validation:** `tests/analytic.rs` (closed-form answers) and `tests/ngspice_compare.rs` (circuits in `tests/circuits`, golden CSVs in `tests/golden`, regenerated with `scripts/gen-ngspice-golden.sh [name ...]`). ngspice is run only as an external program to produce data: never link, vendor, port or ship it (its tree contains a GPL file). Ohmforge-only syntax (ESR/ESL, `rser`, `led` models) is rewritten for the reference run with `* ngspice-replace: FROM => TO` lines. Limits: 1 % of the reference signal's span (tran/DC); AC magnitude 1 % per point (floor 1e-3 of the peak) and phase 1 % of 180°; nested DC row by row. Fast-edge circuits set `tmax` so both simulators resolve the edges. `.include` paths are relative to the circuit file (the golden script rewrites them for ngspice). `of-components/tests` holds the bridge tests, AMS1117 datasheet checks, the MVP board built from parts (compared with the `mvp_board` golden) and a scripted-CPU co-simulation.
 
 ## 4. Coding conventions
 
@@ -93,12 +97,12 @@ Internal dependencies point downwards only: `of-core` depends on nothing interna
 ## 6. Build and test (Windows, PowerShell)
 
 ```powershell
-cd D:\Experiments\Circuit
+cd E:\Work\2026\Projects\Circuit   # or D:\Experiments\Circuit on NorvalS
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo check -p of-app --features gui
-cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web -p of-cpu-riscv
+cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web -p of-cpu-riscv -p of-components
 .\scripts\build-riscv-tests.ps1                  # optional: fetch and build riscv-tests (needs zig or a RISC-V gcc)
 cargo test -p of-cpu-riscv --test riscv_tests -- --nocapture
 cargo run -p of-cli -- --version
@@ -112,7 +116,7 @@ Run all of these before proposing a commit; they mirror `.github/workflows/ci.ym
 ## 7. Git rules
 
 - **Do not commit without Stefan's approval.** Leave changes in the working tree, report what changed, and propose a commit breakdown with messages; commit only what he approves.
-- Commit locally only. **Do not add a remote and do not push** until the owner (Stefan) explicitly says so.
+- The remote is `origin` = <https://github.com/sjnorval/Ohmforge> (branch `main`). **Push only when Stefan explicitly asks**, never force-push, and never handle tokens (use the machine's existing git credentials). Before a push, check that no secrets or build artefacts are tracked.
 - Every commit is signed off: `git commit -s`.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`; small, logical commits.
 - Never rewrite or force-change existing history.
@@ -123,7 +127,7 @@ Run all of these before proposing a commit; they mirror `.github/workflows/ci.ym
 
 ## 9. Windows environment notes
 
-- Machines (no shared remote yet):
+- Machines (shared remote: `origin` on GitHub, see section 7):
   - **Home PC `DESKTOP-TLVLSJ8`**: repo at `E:\Work\2026\Projects\Circuit`, Windows PowerShell 5.1. MSVC comes from **Visual Studio Build Tools 2026** (`...\Microsoft Visual Studio\18\BuildTools`, MSVC 14.51, Windows SDK 10.0.26100), which links fine.
   - **Work PC `NorvalS`**: repo at `D:\Experiments\Circuit`, PowerShell 7. Use **Visual Studio 2022 Build Tools**; its VS 2026 Enterprise `link.exe` lacks `msvcrt.lib` and fails with `LNK1104`.
 - Rust via rustup (`stable-x86_64-pc-windows-msvc`), with rustfmt, clippy and the `wasm32-unknown-unknown` target. If `cargo` is not found in a fresh shell, use `$env:USERPROFILE\.cargo\bin\cargo.exe` or open a new terminal.
