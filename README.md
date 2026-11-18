@@ -1,4 +1,6 @@
-# Ohmforge
+<p align="center">
+  <img src="assets/social-preview.png" alt="Ohmforge — emulate ESP32 in the browser. No board required." width="700">
+</p>
 
 > **Working name.** An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
 
