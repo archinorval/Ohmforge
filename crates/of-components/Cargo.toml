@@ -15,3 +15,7 @@ workspace = true
 [dependencies]
 of-core.workspace = true
 of-component-api.workspace = true
+of-parts.workspace = true
+of-analog.workspace = true
+of-netlist.workspace = true
+thiserror.workspace = true
