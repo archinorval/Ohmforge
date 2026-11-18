@@ -1,0 +1,8 @@
+AMS1117-3.3 macromodel: load regulation at 4.8 V in (constant junction temperature)
+* compare: v(out) i(vin)
+.include ../../../../parts/regulators/ams1117/ams1117.lib
+VIN in 0 4.8
+XU1 in out 0 ams1117 rja=0.001
+ILOAD out 0 0
+.dc ILOAD 0 1 0.01
+.end

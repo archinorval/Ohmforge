@@ -1,0 +1,13 @@
+AMS1117-3.3 macromodel: 10 mA to 500 mA load step with 22 uF tantalum
+* compare: v(out)
+* POLY sources make ngspice use trtol=1; both runs use it, with a tighter
+* reltol so that the ringing after the edges is resolved alike.
+.include ../../../../parts/regulators/ams1117/ams1117.lib
+VIN in 0 5
+XU1 in out 0 ams1117 rja=0.001
+IL out 0 PULSE(10m 500m 100u 1u 1u 300u 1)
+CO out co 22u
+RESR co 0 0.5
+.options trtol=1 reltol=1e-4
+.tran 1u 600u 0 0.5u
+.end

@@ -24,7 +24,8 @@ for cir in "$cir_dir"/*.cir; do
   vecs="$(sed -n 's/^\* compare: //p' "$cir")"
   deck="$tmp/$name.cir"
   # Deck without .end, plus a control block that writes the vectors.
-  grep -vi '^\.end$' "$cir" > "$deck"
+  # Relative .include paths are made absolute (the deck runs from $tmp).
+  grep -vi '^\.end$' "$cir" | DIR="$cir_dir" perl -pe 's{^(\.inc(?:lude)?\s+)(?!/)(\S+)}{$1$ENV{DIR}/$2}i' > "$deck"
   # "* ngspice-replace: FROM => TO" lines rewrite Ohmforge-only syntax
   # (ESR/ESL, LED models, ...) into plain SPICE for the reference run; a
   # literal \n in TO starts a new line.

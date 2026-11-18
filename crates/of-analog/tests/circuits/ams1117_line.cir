@@ -1,0 +1,8 @@
+AMS1117-3.3 macromodel: input sweep from 0 V (start-up, dropout, regulation)
+* compare: v(out) i(vin) v(xu1.tj)
+.include ../../../../parts/regulators/ams1117/ams1117.lib
+VIN in 0 0
+XU1 in out 0 ams1117
+RL out 0 33
+.dc VIN 0 12 0.05
+.end
