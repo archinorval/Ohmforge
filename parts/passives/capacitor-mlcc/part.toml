@@ -31,5 +31,5 @@ manufacturer = "Samsung Electro-Mechanics"
 footprint = "Capacitor_SMD:C_0603_1608Metric"
 
 [license]
-data = "CC-BY-4.0"
-artwork = "CC-BY-4.0"
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"

@@ -9,7 +9,7 @@ default-members = ["crates/*"]
 version = "0.0.1"
 edition = "2024"
 rust-version = "1.95"
-license = "MIT OR Apache-2.0"
+license = "AGPL-3.0-or-later"
 repository = "https://example.invalid/ohmforge" # placeholder, no remote yet
 authors = ["Stefan Norval and Ohmforge contributors"]
 publish = false
@@ -36,7 +36,7 @@ of-kicad = { path = "crates/of-kicad" }
 of-gdb = { path = "crates/of-gdb" }
 of-ui = { path = "crates/of-ui" }
 
-# Third-party (all MIT and/or Apache-2.0; checked by deny.toml)
+# Third-party (permissive licences, all AGPL-compatible; checked by deny.toml)
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 thiserror = "2"

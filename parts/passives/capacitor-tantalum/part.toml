@@ -32,5 +32,5 @@ manufacturer = "KYOCERA AVX"
 footprint = "Capacitor_Tantalum_SMD:CP_EIA-3528-21_Kemet-B"
 
 [license]
-data = "CC-BY-4.0"
-artwork = "CC-BY-4.0"
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"

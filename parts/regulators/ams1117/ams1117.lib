@@ -1,5 +1,5 @@
 * AMS1117 1 A low-dropout regulator: Ohmforge macromodel (original work,
-* not a vendor model). Licence: CC-BY-4.0, like the rest of parts/.
+* not a vendor model). Licence: CC-BY-SA-4.0, like the rest of parts/.
 *
 * Built from standard SPICE primitives only (R, C, D, Q, M, E, G with
 * POLY), so ngspice runs it unchanged for validation. Targets the AMS1117

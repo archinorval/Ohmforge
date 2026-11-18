@@ -48,5 +48,5 @@ offers = [
 ]
 
 [license]
-data = "CC-BY-4.0"
-artwork = "CC-BY-4.0"
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"

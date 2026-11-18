@@ -1,6 +1,6 @@
 //! Parts library: the `part.toml` schema and a loader.
 //!
-//! Part data is licensed CC-BY-4.0 (see parts/LICENSE.md).
+//! Part data is licensed CC-BY-SA-4.0 (see parts/LICENSE.md).
 //!
 //! Besides metadata, electrical ratings and purchasable variants, a part
 //! may list its pins (`[[pin]]`) and an analog model (`[analog]`): either a
@@ -71,7 +71,7 @@ pub struct PartMeta {
 /// Licence of the part data and artwork.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct PartLicense {
-    /// Licence of the data, normally `CC-BY-4.0`.
+    /// Licence of the data, normally `CC-BY-SA-4.0`.
     pub data: String,
     /// Licence of symbols and breadboard art.
     pub artwork: String,
@@ -365,7 +365,7 @@ mod tests {
         let mut ids = std::collections::BTreeSet::new();
         for (d, p) in &parts {
             assert!(ids.insert(p.part.id.clone()), "duplicate id {}", p.part.id);
-            assert_eq!(p.license.data, "CC-BY-4.0", "{}", p.part.id);
+            assert_eq!(p.license.data, "CC-BY-SA-4.0", "{}", p.part.id);
             assert!(p.check().is_empty(), "{}: {:?}", p.part.id, p.check());
             if let Some(f) = p.analog.as_ref().and_then(|a| a.file.as_ref()) {
                 assert!(d.join(f).is_file(), "{}: missing {f}", p.part.id);
@@ -417,7 +417,7 @@ mod tests {
         let src = include_str!("../../../parts/sensors/bosch-bme280/part.toml");
         let p = parse_part(src).unwrap();
         assert_eq!(p.part.id, "bosch.bme280");
-        assert_eq!(p.license.data, "CC-BY-4.0");
+        assert_eq!(p.license.data, "CC-BY-SA-4.0");
         assert!(!p.variants.is_empty());
     }
 }
