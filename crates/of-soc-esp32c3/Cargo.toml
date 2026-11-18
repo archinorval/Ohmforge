@@ -1,6 +1,6 @@
 [package]
 name = "of-soc-esp32c3"
-description = "ESP32-C3 SoC: memory map, peripherals, ROM hooks."
+description = "ESP32-C3 SoC: memory map, peripherals, direct ELF boot and the kernel engine."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -15,3 +15,9 @@ workspace = true
 [dependencies]
 of-core.workspace = true
 of-cpu-riscv.workspace = true
+of-firmware.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+of-analog.workspace = true
+of-components.workspace = true

@@ -14,7 +14,7 @@ Thank you for helping. This project is pre-alpha, so the best contributions righ
 - Code you contribute is licensed AGPL-3.0-or-later; part data, artwork and docs CC-BY-SA-4.0.
 - Only add dependencies with licences on the `deny.toml` allow list (permissive licences plus AGPL-3.0). **Never** add a GPL-2.0-only or LGPL dependency. `cargo deny check` enforces this.
 - Do not copy or translate code from GPL projects (Falstad CircuitJS, SimulIDE, QEMU) or proprietary ones (Wokwi). Ideas and published algorithms are fine; code is not.
-- QEMU integration lives in a separate repository and process; this workspace only contains the IPC client.
+- QEMU integration (planned) will live in a separate repository and process; this workspace will only contain the IPC client (`of-cpu-qemu-ipc`).
 
 ## Before you open a pull request
 
@@ -27,11 +27,11 @@ cargo deny check        # if cargo-deny is installed
 
 ## Adding a part
 
-1. Create `parts/<category>/<manufacturer>-<part>/part.toml`, copying `parts/sensors/bosch-bme280/part.toml`.
+1. Create `parts/<category>/<manufacturer>-<part>/part.toml` (or `parts/<category>/<part>/` for generic parts such as `parts/passives/resistor`), copying `parts/sensors/bosch-bme280/part.toml`. Parts that the analog solver should simulate also need an `[analog]` section; see `parts/passives/resistor/part.toml` and `AGENTS.md` section 3b.
 2. Fill in pins and electrical parameters with min/typ/max from the datasheet, at least one `[[variant]]` with an MPN, and the `[license]` block.
 3. Link the datasheet; do not commit it. Do not commit vendor SPICE models with restrictive terms.
 4. If the part needs behaviour beyond the generic models, add a Rust model in `crates/of-components` or a WASM model.
-5. Add a small test circuit with expected readings. Bench-measured parts should include a capture.
+5. Add a small test circuit with expected readings (see `crates/of-components/tests/`). Bench-measured parts should include a capture.
 
 ## Labels
 

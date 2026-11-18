@@ -4,7 +4,7 @@ type: decision
 domain: ux
 status: stable
 updated: 2026-11-03
-source: https://github.com/sjnorval/Ohmforge/docs/DESIGN_AND_PLAN.md §9, §14 | Synergy Codes (schematic editor hard parts)
+source: https://github.com/sjnorval/Ohmforge/blob/main/docs/DESIGN_AND_PLAN.md §9, §14 | Synergy Codes (schematic editor hard parts)
 confidence: high
 tags: [design, schematic-editor, grid, first-class-nets, erc]
 ---

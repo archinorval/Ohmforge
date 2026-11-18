@@ -1,0 +1,25 @@
+# Test firmware
+
+Small firmware images that the simulator's tests run. Everything here is our
+own code (AGPL-3.0-or-later); third-party binaries are never committed.
+
+| Folder | What it does | Used by |
+|---|---|---|
+| `esp32c3-blinky` | Bare-metal RV32IMC assembly for the ESP32-C3: prints `ohmforge blinky` on UART0, routes GPIO8 through the IO MUX and GPIO matrix, then toggles it every 250 µs using SYSTIMER deadlines | `crates/of-soc-esp32c3/tests/blinky.rs`, `tests/blinky_led.rs` |
+
+Each folder holds the source, a linker script, a `build.sh` and the built ELF.
+The ELF is committed (about 1.5 KB) so the tests need no RISC-V toolchain.
+
+## Rebuilding
+
+The build needs zig, which bundles clang and lld for riscv32:
+
+```sh
+pip install ziglang==0.17.1
+bash firmware/esp32c3-blinky/build.sh
+```
+
+The build is reproducible: it embeds no paths or build IDs, and `build.sh`
+resets the ELF to mode 644. CI rebuilds every image with the pinned zig and
+fails if the result differs from the committed file, so commit the source and
+the rebuilt ELF together.

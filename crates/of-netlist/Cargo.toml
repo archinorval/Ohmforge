@@ -1,6 +1,6 @@
 [package]
 name = "of-netlist"
-description = "Circuit graph, nets and analog/digital partitioning."
+description = "Circuit graph and nets, and the SPICE netlist reader (analog/digital partitioning later)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

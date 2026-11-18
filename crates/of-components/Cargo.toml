@@ -1,6 +1,6 @@
 [package]
 name = "of-components"
-description = "Built-in component models (passives, LEDs, sensors, displays)."
+description = "Built-in part models and the bridge from parts-library parts to analog solver devices."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

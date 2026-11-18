@@ -1,7 +1,7 @@
 # Ohmforge: an ESP32 circuit simulator in Rust
 
 > **Design and development plan, draft 1, 12 November 2026.**
-> A researched design and phased development plan for an open-source, true-to-life ESP32 mixed-signal simulator with built-in bill-of-materials tracking. "Ohmforge" is a working name only.
+> A researched design and phased development plan for an open-source, true-to-life ESP32 mixed-signal simulator with built-in bill-of-materials tracking.
 >
 > Online version: [ESP32 Circuit Simulator: Design & Development Plan](https://cursor.com/canvas/store-a9cbe2bd-135b-40a8-99e5-f1384f921301/f357e02f-62ec-48c3-93b2-d13aaa1852f2)
 
@@ -225,8 +225,8 @@ ohmforge/
 │  ├─ of-app/                # desktop binary (eframe)
 │  ├─ of-web/                # WASM entry point (trunk)
 │  └─ of-cli/                # headless runner for CI and scripting
-├─ library/                  # parts data (CC-BY-SA-4.0), one dir per part
-├─ firmware-tests/           # source for test firmware, built in CI
+├─ parts/                    # parts data (CC-BY-SA-4.0), one dir per part
+├─ firmware/                 # test firmware source and small built ELFs, rebuilt in CI
 ├─ validation/               # ngspice and hardware reference traces
 ├─ docs/                     # mdBook site
 ├─ rfcs/                     # design proposals
@@ -296,7 +296,7 @@ artwork = "CC-BY-SA-4.0"
 ## 8. Firmware loading
 
 1. **Accept what the toolchains produce.** ELF from ESP-IDF, Arduino-ESP32, esp-hal/esp-idf-hal (Rust), MicroPython; merged flash `.bin`; UF2.
-2. **Parse and map.** `object`/`goblin` for sections, `gimli` for DWARF so the debugger and profiler show source lines and variables.
+2. **Parse and map.** Our own minimal ELF32 reader in `of-firmware` for segments and symbols (`object`/`goblin` remain options for wider formats), `gimli` for DWARF so the debugger and profiler show source lines and variables.
 3. **Build a flash image.** Use espflash's image format logic to place bootloader, partition table and app at real offsets; eFuses from a per-chip default file.
 4. **Boot like silicon.** Run the real mask ROM from Espressif's Apache-2.0 esp-rom-elfs, or a fast direct-boot path that skips the bootloader.
 5. **Watch and rebuild.** Optional: watch the build directory and hot-reload the firmware while keeping the circuit state.
@@ -394,7 +394,7 @@ The rig runs on a self-hosted GitHub Actions runner; captured traces are stored 
 
 - Contributions under the **Developer Certificate of Origin** (`Signed-off-by`). Offering a separate commercial licence for code written by outside contributors also needs a contributor licence agreement (CLA); add one before accepting outside code if that model is kept.
 - **Trademarks:** describe the project as a simulator for ESP32 chips; avoid Espressif logos or names that suggest endorsement.
-- Test firmware is built from source in CI rather than committed as binaries, so no blob licensing questions arise in the repo.
+- Test firmware is our own source. Small ELFs built from it may be committed only if CI rebuilds them byte-identically from that source (as for `firmware/esp32c3-blinky`); third-party firmware binaries are never committed, so no blob licensing questions arise in the repo.
 
 *This licence analysis is careful engineering guidance, not legal advice.*
 
@@ -403,7 +403,7 @@ The rig runs on a self-hosted GitHub Actions runner; captured traces are stored 
 | Repository | Purpose | Licence |
 |---|---|---|
 | `ohmforge` | Workspace, app, CLI, docs, RFCs | AGPL-3.0-or-later |
-| `ohmforge-parts` | Community parts library (or `library/` in-tree until it grows) | CC-BY-SA-4.0 data, AGPL models |
+| `ohmforge-parts` | Community parts library (or `parts/` in-tree until it grows) | CC-BY-SA-4.0 data, AGPL models |
 | `ohmforge-qemu-bridge` | Patched Espressif QEMU speaking the Ohmforge sync protocol | GPL-2.0 |
 | `ohmforge-hil` | Hardware rig firmware, capture scripts, reference traces | AGPL-3.0-or-later |
 

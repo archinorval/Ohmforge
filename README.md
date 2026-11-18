@@ -2,9 +2,14 @@
   <img src="assets/social-preview.png" alt="Ohmforge — emulate ESP32 in the browser. No board required." width="700">
 </p>
 
-> **Working name.** An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
+<p align="center">
+  <a href="https://github.com/sjnorval/Ohmforge/actions/workflows/ci.yml"><img src="https://github.com/sjnorval/Ohmforge/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-AGPL--3.0--or--later-blue" alt="Licence: AGPL-3.0-or-later"></a>
+</p>
 
-**Status:** pre-alpha. The SPICE-grade analog solver (`of-analog`, checked against ngspice), the RV32IMC CPU core (`of-cpu-riscv`, passing riscv-tests), the co-simulation kernel (`of-core`) and the parts-to-devices bridge (`of-components`) work; the ESP32-C3 SoC and the GUI are next. The plan is in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md); progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
+
+**Status:** pre-alpha. The SPICE-grade analog solver (`of-analog`, checked against ngspice), the RV32IMC CPU core (`of-cpu-riscv`, passing riscv-tests), the co-simulation kernel (`of-core`) and the parts-to-devices bridge (`of-components`) work. The ESP32-C3 SoC (`of-soc-esp32c3`) has its first slice: a blinky firmware boots from its ELF and drives a simulated LED and resistor end to end. The GUI is still a scaffold. The plan is in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md); progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Goals
 
@@ -25,8 +30,8 @@
 | `of-parts` | `part.toml` schema and loader |
 | `of-cpu-riscv`, `of-cpu-xtensa` | CPU cores (ESP32-C3 first, Xtensa later) |
 | `of-cpu-qemu-ipc` | Client for the out-of-process QEMU sidecar (no GPL linking) |
-| `of-soc-esp32c3`, `of-soc-esp32` | SoC memory maps and peripherals |
-| `of-firmware` | ELF, flash image and DWARF loading |
+| `of-soc-esp32c3`, `of-soc-esp32` | SoC memory maps and peripherals (ESP32-C3 first) |
+| `of-firmware` | ELF loading (flash images and DWARF later) |
 | `of-plugin-wasm` | Sandboxed WASM component host |
 | `of-instruments` | Scope, logic analyser, decoders, multimeter, PSU |
 | `of-bom` | Bill of materials, costing, CSV export |
@@ -37,7 +42,7 @@
 | `of-web` | WASM entry point |
 | `of-cli` | `ohmforge` headless runner |
 
-Other folders: `parts/` (CC-BY-SA-4.0 parts library), `docs/` (design and plan), `.github/workflows/` (CI, inert until pushed).
+Other folders: `parts/` (CC-BY-SA-4.0 parts library), `firmware/` (small test firmware, see [`firmware/README.md`](firmware/README.md)), `scripts/` (riscv-tests and ngspice golden-data helpers), `docs/` (design, plan, roadmap and UX research), `rfcs/` (design proposals), `assets/` (logo and icons), `.github/workflows/` (CI: fmt, clippy, cargo-deny, tests on Linux/Windows/macOS, wasm, GUI and riscv-tests).
 
 ## Building
 
@@ -47,12 +52,12 @@ Requires Rust 1.95 or newer (edition 2024; egui 0.37 needs 1.95). `rust-toolchai
 cargo check --workspace
 cargo test --workspace
 cargo run -p of-cli -- --version
+cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv   # SPICE netlist to CSV
+cargo test -p of-soc-esp32c3          # blinky firmware on the ESP32-C3 model, LED co-simulated
 cargo run -p of-app --features gui   # desktop window (pulls in egui)
 ```
 
-## Renaming the project
-
-"Ohmforge" and the `of-` crate prefix are placeholders. To rename, replace the strings `ohmforge`, `Ohmforge`, `of-` and `of_` across the repo and rename the `crates/of-*` folders. `scripts/rename.ps1` does this in one go (review the diff before committing).
+On Windows, build from a shell with the MSVC Build Tools environment loaded (see `AGENTS.md` section 9).
 
 ## Licence
 
@@ -63,8 +68,8 @@ Parts data, artwork and docs: CC-BY-SA-4.0 ([parts/LICENSE.md](parts/LICENSE.md)
 Contributions are accepted under the Developer Certificate of Origin; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
-## Development Status
+## Development status
 
 - **P1 Analog core**: done (sparse MNA with DC/AC/transient analyses, SPICE device models, AMS1117 macromodel, parts bridge; all within 1 % of ngspice).
 - **Phase one, RISC-V core**: done (RV32IMC(+A), 75 of 77 riscv-tests).
-- **P2 ESP32-C3 MVP**: next; see [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- **P2 ESP32-C3 MVP**: in progress. Done so far: ELF loading, the C3 memory map, GPIO/IO MUX output, UART0 transmit, SYSTIMER, and the chip running under the kernel next to the analog solver. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
