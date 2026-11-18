@@ -29,7 +29,7 @@ jobs:
         with: { targets: wasm32-unknown-unknown }
       - uses: Swatinem/rust-cache@v2
       # Simulation core crates must build for the web target.
-      - run: cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web -p of-cpu-riscv -p of-components
+      - run: cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web -p of-cpu-riscv -p of-components -p of-firmware -p of-soc-esp32c3
   gui:
     runs-on: ubuntu-latest
     steps:
@@ -44,6 +44,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # riscv-tests is BSD-3-Clause; built from a pinned commit, never committed.
-      - run: pip install ziglang
+      - run: pip install ziglang==0.17.1
       - run: scripts/build-riscv-tests.sh
       - run: cargo test -p of-cpu-riscv --test riscv_tests -- --nocapture
+      # The committed test firmware must be reproducible from its source.
+      - run: bash firmware/esp32c3-blinky/build.sh && git diff --exit-code -- firmware/
