@@ -40,7 +40,7 @@
 | UI | egui + wgpu via eframe; native and WASM from one codebase |
 | Plugins | Native Rust components in-tree; sandboxed WASM components for the community |
 | BOM | First-class: MPN, supplier SKUs, ZAR pricing snapshots, CSV/XLSX/KiCad/JLCPCB export |
-| Licence | Code MIT OR Apache-2.0; parts data and docs CC-BY-4.0; QEMU bridge kept separate under GPL-2.0 |
+| Licence | Code AGPL-3.0-or-later (commercial licence available separately); parts data and docs CC-BY-SA-4.0; QEMU bridge kept separate under GPL-2.0 |
 
 ---
 
@@ -89,7 +89,7 @@ The gap nobody fills: real firmware, an honest analog solver and the parts you w
 | Runs in the browser and in-process, no sidecar | GPL-2.0, so must live in a separate process |
 | Deterministic lockstep with the analog solver | Not available on the web target |
 | Cycle-approximate timing we control | Missing the very peripherals hobbyists use (I2C, SPI, RMT) |
-| Licence-clean (MIT/Apache) | Coarse time sync through IPC |
+| Licence-clean (no GPL-2.0 linking) | Coarse time sync through IPC |
 | RV32IMC is a small, well-specified ISA with conformance suites | But: fastest route to classic ESP32 coverage, and an excellent black-box reference for testing our own cores |
 
 **Decision:** ESP32-C3 on our own core first, because RISC-V is simpler and conformance tests exist. Classic ESP32 and S3 run on a QEMU sidecar (the lcgamboa fork already builds QEMU as a library with GPIO callbacks and Wi-Fi) until our own Xtensa LX6/LX7 core lands in phase 4. Xtensa windowed registers and the zero-overhead loop are the hard parts; budget for them.
@@ -210,7 +210,7 @@ ohmforge/
 │  ├─ of-digital/            # event-driven logic kernel, 4-state values
 │  ├─ of-cpu-riscv/          # RV32IMC(+A) interpreter, block cache
 │  ├─ of-cpu-xtensa/         # LX6/LX7 core (phase 4)
-│  ├─ of-cpu-qemu-ipc/       # MIT/Apache client for the GPL sidecar protocol
+│  ├─ of-cpu-qemu-ipc/       # AGPL client for the GPL sidecar protocol
 │  ├─ of-soc-esp32c3/        # C3 peripherals, memory map, ROM hooks
 │  ├─ of-soc-esp32/          # classic ESP32 peripherals
 │  ├─ of-firmware/           # ELF/bin/flash image loading, DWARF symbols
@@ -225,12 +225,12 @@ ohmforge/
 │  ├─ of-app/                # desktop binary (eframe)
 │  ├─ of-web/                # WASM entry point (trunk)
 │  └─ of-cli/                # headless runner for CI and scripting
-├─ library/                  # parts data (CC-BY-4.0), one dir per part
+├─ library/                  # parts data (CC-BY-SA-4.0), one dir per part
 ├─ firmware-tests/           # source for test firmware, built in CI
 ├─ validation/               # ngspice and hardware reference traces
 ├─ docs/                     # mdBook site
 ├─ rfcs/                     # design proposals
-└─ deny.toml, LICENSE-MIT, LICENSE-APACHE, NOTICE
+└─ deny.toml, LICENSE, NOTICE
 ```
 
 ---
@@ -282,8 +282,8 @@ offers = [
 ]
 
 [license]
-data = "CC-BY-4.0"
-artwork = "CC-BY-4.0"
+data = "CC-BY-SA-4.0"
+artwork = "CC-BY-SA-4.0"
 ```
 
 - Built-in parts are Rust (fast, reviewed). Community parts are WASM modules in a sandbox: no file or network access, fuel-limited, deterministic.
@@ -376,8 +376,8 @@ The rig runs on a self-hosted GitHub Actions runner; captured traces are stored 
 
 | Item | Licence | How we use it safely |
 |---|---|---|
-| Ohmforge code | MIT OR Apache-2.0 | Rust ecosystem norm; Apache adds a patent grant; compatible with every crate below |
-| Parts data, artwork, docs | CC-BY-4.0 | Reusable, including commercially, with attribution |
+| Ohmforge code | AGPL-3.0-or-later | Strong copyleft: anyone who ships it or runs it as a hosted service must share their full source; patent grant included; compatible with the permissive crates below. Closed-source use needs a separate commercial licence |
+| Parts data, artwork, docs | CC-BY-SA-4.0 | Reusable with attribution; changed or derived parts must be shared under the same licence |
 | egui, wgpu, faer, nalgebra, serde, object, gimli | MIT and/or Apache-2.0 | Link freely |
 | Espressif ROM ELFs | Apache-2.0 | May redistribute; ship LICENSE and NOTICE; prefer download-on-first-run |
 | ESP-IDF, esp-hal, esp-pacs | Apache-2.0 / MIT | Reference and generate register maps |
@@ -390,9 +390,9 @@ The rig runs on a self-hosted GitHub Actions runner; captured traces are stored 
 | KiCad libraries | CC-BY-SA 4.0 with exception | Do not bundle; reference footprint names as strings only |
 | Vendor SPICE models | Often no redistribution | Store URL plus checksum; user fetches |
 
-> ⚠️ **The one rule that prevents licence conflicts.** No GPL or LGPL code is linked into any crate in the main workspace. `cargo-deny` enforces this on every pull request, and anything copyleft lives in its own repository and process. The FSF treats programs talking over pipes or sockets as separate works, which is what keeps the QEMU bridge clean.
+> ⚠️ **The one rule that prevents licence conflicts.** No GPL-2.0-only or LGPL code is linked into any crate in the main workspace (GPL-2.0-only cannot be combined with AGPL-3.0). `cargo-deny` enforces this on every pull request, and anything copyleft lives in its own repository and process. The FSF treats programs talking over pipes or sockets as separate works, which is what keeps the QEMU bridge clean.
 
-- Contributions under the **Developer Certificate of Origin** (`Signed-off-by`), not a CLA: lower friction, and the DCO GitHub app checks it.
+- Contributions under the **Developer Certificate of Origin** (`Signed-off-by`). Offering a separate commercial licence for code written by outside contributors also needs a contributor licence agreement (CLA); add one before accepting outside code if that model is kept.
 - **Trademarks:** describe the project as a simulator for ESP32 chips; avoid Espressif logos or names that suggest endorsement.
 - Test firmware is built from source in CI rather than committed as binaries, so no blob licensing questions arise in the repo.
 
@@ -402,10 +402,10 @@ The rig runs on a self-hosted GitHub Actions runner; captured traces are stored 
 
 | Repository | Purpose | Licence |
 |---|---|---|
-| `ohmforge` | Workspace, app, CLI, docs, RFCs | MIT OR Apache-2.0 |
-| `ohmforge-parts` | Community parts library (or `library/` in-tree until it grows) | CC-BY-4.0 data, MIT/Apache models |
+| `ohmforge` | Workspace, app, CLI, docs, RFCs | AGPL-3.0-or-later |
+| `ohmforge-parts` | Community parts library (or `library/` in-tree until it grows) | CC-BY-SA-4.0 data, AGPL models |
 | `ohmforge-qemu-bridge` | Patched Espressif QEMU speaking the Ohmforge sync protocol | GPL-2.0 |
-| `ohmforge-hil` | Hardware rig firmware, capture scripts, reference traces | MIT OR Apache-2.0 |
+| `ohmforge-hil` | Hardware rig firmware, capture scripts, reference traces | AGPL-3.0-or-later |
 
 - **Governance:** start as a BDFL project with Stefan as lead maintainer; `GOVERNANCE.md` describes how a contributor becomes a maintainer (sustained, reviewed contributions) and when it moves to a small core team.
 - **RFC process** in `rfcs/` for anything touching the component API, file formats or the sync protocol.
@@ -465,8 +465,9 @@ jobs:
 # deny.toml (excerpt)
 [licenses]
 allow = ["MIT", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "ISC",
-         "Zlib", "Unicode-3.0", "MPL-2.0", "CC0-1.0"]
-# GPL, LGPL and AGPL are rejected by omission
+         "Zlib", "Unicode-3.0", "MPL-2.0", "CC0-1.0",
+         "AGPL-3.0-or-later", "AGPL-3.0-only"]
+# GPL and LGPL are rejected by omission
 ```
 
 ### 13.4 Community parts library

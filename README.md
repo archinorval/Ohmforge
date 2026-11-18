@@ -35,7 +35,7 @@
 | `of-web` | WASM entry point |
 | `of-cli` | `ohmforge` headless runner |
 
-Other folders: `parts/` (CC-BY-4.0 parts library), `docs/` (design and plan), `.github/workflows/` (CI, inert until pushed).
+Other folders: `parts/` (CC-BY-SA-4.0 parts library), `docs/` (design and plan), `.github/workflows/` (CI, inert until pushed).
 
 ## Building
 
@@ -76,7 +76,9 @@ cargo run -p of-app --features gui   # desktop window (pulls in egui)
 See `docs/DESIGN_AND_PLAN.md` for the full phased development plan.
 ## Licence
 
-Code: MIT OR Apache-2.0, at your option ([LICENSE-MIT](LICENSE-MIT), [LICENSE-APACHE](LICENSE-APACHE)). Parts data and artwork: CC-BY-4.0 ([parts/LICENSE.md](parts/LICENSE.md)). See [NOTICE](NOTICE).
+Code: [GNU AGPL-3.0-or-later](LICENSE). If you distribute Ohmforge or a modified version, or offer it to users over a network, you must share the full source under the same licence. For closed-source commercial use, ask about a separate commercial licence.
+
+Parts data, artwork and docs: CC-BY-SA-4.0 ([parts/LICENSE.md](parts/LICENSE.md)). See [NOTICE](NOTICE).
 
 Contributions are accepted under the Developer Certificate of Origin; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
