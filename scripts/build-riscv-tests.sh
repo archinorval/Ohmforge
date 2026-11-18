@@ -11,15 +11,30 @@ set -euo pipefail
 REV=3df703cd52d5f0d8224e3c50bf03c6cb70efff98   # pinned riscv-tests commit
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/target/riscv-tests}"
-SRC="$ROOT/target/riscv-tests-src"
+# The source clone lives outside target/ so build caches (CI's rust-cache
+# restores target/) never hand us a stale or partial checkout.
+SRC="${RISCV_TESTS_SRC:-${RUNNER_TEMP:-$ROOT/.cache}/riscv-tests-src}"
+URL=https://github.com/riscv-software-src/riscv-tests.git
 SUITES="rv32ui rv32um rv32ua rv32uc rv32mi"
 
-if [ ! -d "$SRC/.git" ]; then
-  git clone --quiet https://github.com/riscv-software-src/riscv-tests.git "$SRC"
+# Clone if needed, then check out the pinned commit and the env submodule;
+# fails if anything is missing so the caller can start from scratch.
+checkout() {
+  if [ ! -d "$SRC/.git" ]; then
+    mkdir -p "$(dirname "$SRC")"
+    git clone --quiet "$URL" "$SRC" || return 1
+  fi
+  git -C "$SRC" cat-file -e "$REV^{commit}" 2>/dev/null ||
+    git -C "$SRC" fetch --quiet origin "$REV" || return 1
+  git -C "$SRC" checkout --quiet --force "$REV" || return 1
+  git -C "$SRC" submodule update --init --force --quiet env || return 1
+  [ -f "$SRC/env/p/link.ld" ] && [ -d "$SRC/isa/rv32ui" ]
+}
+if ! checkout; then
+  echo "riscv-tests checkout in $SRC is stale or incomplete; cloning again" >&2
+  rm -rf "$SRC"
+  checkout || { echo "error: could not check out riscv-tests $REV into $SRC" >&2; exit 1; }
 fi
-git -C "$SRC" fetch --quiet origin "$REV" 2>/dev/null || true
-git -C "$SRC" checkout --quiet "$REV"
-git -C "$SRC" submodule update --init --quiet env
 
 if [ -n "${RISCV_CC:-}" ]; then
   read -r -a CC <<<"$RISCV_CC"
