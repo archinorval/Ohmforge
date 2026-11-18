@@ -44,7 +44,7 @@ Status: done; the core is implemented and tested (62 unit tests, 1 doc test, 75 
 - [ ] RFC template in `rfcs/0000-template.md`
 - [ ] mdBook docs skeleton
 - [x] Choose the final project name: Ohmforge
-- [ ] Fill in the Code of Conduct contact
+- [x] Fill in the Code of Conduct contact
 
 ## P1 Analog core (weeks 4 to 16)
 
