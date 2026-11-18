@@ -2,7 +2,7 @@
 
 > **Working name.** An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
 
-**Status:** pre-alpha scaffold. Nothing simulates yet; the crates are compiling stubs that follow the plan in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md).
+**Status:** pre-alpha. The SPICE-grade analog solver (`of-analog`, checked against ngspice), the RV32IMC CPU core (`of-cpu-riscv`, passing riscv-tests), the co-simulation kernel (`of-core`) and the parts-to-devices bridge (`of-components`) work; the ESP32-C3 SoC and the GUI are next. The plan is in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md); progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Goals
 
@@ -63,4 +63,6 @@ Contributions are accepted under the Developer Certificate of Origin; see [CONTR
 
 ## Development Status
 
-- **Phase 0 (Pre-alpha)**: MNA solver with dense matrix fallback, capacitor/inductor state tracking, transient analysis in progress
+- **P1 Analog core**: done (sparse MNA with DC/AC/transient analyses, SPICE device models, AMS1117 macromodel, parts bridge; all within 1 % of ngspice).
+- **Phase one, RISC-V core**: done (RV32IMC(+A), 75 of 77 riscv-tests).
+- **P2 ESP32-C3 MVP**: next; see [`docs/ROADMAP.md`](docs/ROADMAP.md).

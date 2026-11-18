@@ -30,7 +30,7 @@ Status: done; the core is implemented and tested (62 unit tests, 1 doc test, 75 
 ## P0 Foundations (weeks 0 to 6)
 
 - [x] Cargo workspace with stub crates matching the planned layout
-- [x] Licences (MIT OR Apache-2.0, CC-BY-4.0 parts), NOTICE, README, CONTRIBUTING, Code of Conduct
+- [x] Licences (AGPL-3.0-or-later code, CC-BY-SA-4.0 parts and docs; relicensed from MIT OR Apache-2.0 / CC-BY-4.0 in November 2026), NOTICE, README, CONTRIBUTING, Code of Conduct
 - [x] rustfmt, clippy, cargo-deny and toolchain configuration
 - [x] CI workflow file (inert until pushed)
 - [x] Example part (`parts/sensors/bosch-bme280/part.toml`) parsed by `of-parts`
