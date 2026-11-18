@@ -70,6 +70,11 @@ pub struct HartConfig {
     pub clock_hz: u64,
     /// Which `mie`/`mip` bits (interrupt lines) exist.
     pub irq_mask: u32,
+    /// Whether the standard `mie` and `mip` CSRs exist. The ESP32-C3 has
+    /// neither (its interrupt controller enables and reports the lines;
+    /// touching `mie`/`mip` is an illegal instruction), so every line in
+    /// `irq_mask` is then enabled as far as the core is concerned.
+    pub mie_mip: bool,
     /// Misaligned data access behaviour.
     pub misaligned: MisalignedPolicy,
     /// `ebreak` behaviour.
@@ -80,7 +85,8 @@ pub struct HartConfig {
 
 impl HartConfig {
     /// ESP32-C3: RV32IMC + Zicsr + Zifencei at 160 MHz, 31 interrupt lines
-    /// (bits 1 to 31), estimated timings.
+    /// (bits 1 to 31) gated by the SoC's interrupt controller rather than
+    /// `mie` (no `mie`/`mip` CSRs), estimated timings.
     pub fn esp32c3() -> Self {
         Self {
             hart_id: 0,
@@ -92,6 +98,7 @@ impl HartConfig {
             },
             clock_hz: 160_000_000,
             irq_mask: 0xffff_fffe,
+            mie_mip: false,
             misaligned: MisalignedPolicy::Trap,
             ebreak: EbreakAction::Trap,
             timing: TimingModel::ESP32C3_ESTIMATE,
@@ -122,6 +129,7 @@ impl HartConfig {
             },
             clock_hz: 100_000_000,
             irq_mask: 0xffff_0888,
+            mie_mip: true,
             misaligned: MisalignedPolicy::Trap,
             ebreak: EbreakAction::Trap,
             timing: TimingModel::UNIT,
@@ -224,7 +232,8 @@ pub struct Hart {
 impl Hart {
     /// A hart in its reset state.
     pub fn new(config: HartConfig) -> Self {
-        let csr = CsrFile::new(config.extensions.misa(), config.hart_id, config.irq_mask);
+        let mut csr = CsrFile::new(config.extensions.misa(), config.hart_id, config.irq_mask);
+        csr.mie_mip = config.mie_mip;
         let period_ps = (1_000_000_000_000 / config.clock_hz.max(1)).max(1);
         Self {
             pc: config.reset_pc,
@@ -383,7 +392,11 @@ impl Hart {
     }
 
     fn pending_enabled(&self) -> u32 {
-        self.csr.mip & self.csr.mie
+        if self.config.mie_mip {
+            self.csr.mip & self.csr.mie
+        } else {
+            self.csr.mip
+        }
     }
 
     // ----- execution --------------------------------------------------------

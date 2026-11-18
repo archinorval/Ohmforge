@@ -73,6 +73,10 @@ pub struct CsrFile {
     pub mimpid: u32,
     /// Writable `mie`/`mip` bits (which interrupt lines exist).
     pub irq_mask: u32,
+    /// Whether `mie` and `mip` are implemented (see
+    /// [`crate::HartConfig::mie_mip`]); when not, accessing them goes to the
+    /// bus and is normally an illegal instruction.
+    pub mie_mip: bool,
     /// Set when an instruction wrote `mcycle[h]`/`minstret[h]` (suppresses
     /// that instruction's own increment, as the spec requires).
     pub(crate) counter_written: u8,
@@ -110,6 +114,7 @@ impl CsrFile {
             marchid: 0,
             mimpid: 0,
             irq_mask,
+            mie_mip: true,
             counter_written: 0,
         }
     }
@@ -121,6 +126,9 @@ impl CsrFile {
     /// Read without side effects. `None` if the core does not implement it.
     pub fn peek(&self, csr: u16) -> Option<u32> {
         use addr::*;
+        if !self.mie_mip && matches!(csr, MIE | MIP) {
+            return None;
+        }
         Some(match csr {
             MSTATUS => self.mstatus,
             MISA => self.misa,
@@ -155,6 +163,9 @@ impl CsrFile {
     /// implemented by the core.
     pub fn poke(&mut self, csr: u16, v: u32) -> bool {
         use addr::*;
+        if !self.mie_mip && matches!(csr, MIE | MIP) {
+            return false;
+        }
         match csr {
             MSTATUS => self.mstatus = (v & (MSTATUS_MIE | MSTATUS_MPIE)) | MSTATUS_MPP,
             MISA | MSTATUSH => {} // WARL: read-only in this implementation
@@ -214,6 +225,17 @@ mod tests {
         assert_eq!(c.peek(addr::MEPC), Some(0x4000_0002));
         assert_eq!(c.access(addr::MHARTID, true), CsrAccess::Illegal);
         assert_eq!(c.access(0x7c0, false), CsrAccess::Unknown);
+    }
+
+    #[test]
+    fn mie_and_mip_can_be_absent() {
+        let mut c = CsrFile::new(0, 0, 0xffff_fffe);
+        c.mie_mip = false;
+        assert_eq!(c.peek(addr::MIE), None);
+        assert_eq!(c.peek(addr::MIP), None);
+        assert!(!c.poke(addr::MIE, 1 << 5));
+        assert_eq!(c.access(addr::MIE, false), CsrAccess::Unknown);
+        assert_eq!(c.access(addr::MSTATUS, false), CsrAccess::Ok(MSTATUS_MPP));
     }
 
     #[test]

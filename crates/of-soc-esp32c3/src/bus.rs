@@ -2,12 +2,17 @@
 
 use std::collections::BTreeMap;
 
+use of_core::SimTime;
 use of_cpu_riscv::{AccessKind, Bus, BusError, Size};
 
 use crate::gpio::Gpio;
+use crate::intmatrix::{IntMatrix, source};
 use crate::map::{self, within};
+use crate::rtc_cntl::{RtcCntl, RtcWatchdog};
 use crate::systimer::Systimer;
+use crate::timg::Timg;
 use crate::uart;
+use crate::watchdog::{ResetKind, ResetSource, WatchdogReset};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mem {
@@ -29,9 +34,17 @@ pub struct SocBus {
     rtc: Vec<u8>,
     /// GPIO, GPIO matrix and IO MUX.
     pub gpio: Gpio,
-    /// SYSTIMER unit 0.
+    /// SYSTIMER.
     pub systimer: Systimer,
+    /// Timer groups 0 and 1 (timer and MWDT each).
+    pub timg: [Timg; 2],
+    /// RTC_CNTL watchdogs (RWDT, SWD).
+    pub rtc_cntl: RtcCntl,
+    /// Interrupt matrix and CPU interrupt controller.
+    pub intmatrix: IntMatrix,
     uart_tx: Vec<u8>,
+    /// Writes to timed peripherals, applied at the next [`Self::settle`].
+    deferred: Vec<(u32, u32)>,
     regs: BTreeMap<u32, u32>,
     unmodelled: BTreeMap<u32, u64>,
     sync: bool,
@@ -57,8 +70,12 @@ impl SocBus {
             flash_d: vec![0; FLASH_WINDOW_BYTES],
             rtc: vec![0; map::RTC_FAST.1 as usize],
             gpio: Gpio::new(),
-            systimer: Systimer::default(),
+            systimer: Systimer::new(),
+            timg: [Timg::new(), Timg::new()],
+            rtc_cntl: RtcCntl::new(),
+            intmatrix: IntMatrix::new(),
             uart_tx: Vec::new(),
+            deferred: Vec::new(),
             regs: BTreeMap::new(),
             unmodelled: BTreeMap::new(),
             sync: false,
@@ -136,6 +153,117 @@ impl SocBus {
         &self.unmodelled
     }
 
+    /// Arm the watchdogs the ROM leaves running after a power-on reset into
+    /// flash boot (TIMG0 MWDT and RWDT flash boot protection, SWD) at `t`.
+    pub fn arm_boot_watchdogs(&mut self, t: SimTime) {
+        self.timg[0].arm_boot_protection(t);
+        self.rtc_cntl.arm_boot_watchdogs(t);
+    }
+
+    /// Reset the peripherals a `kind` reset clears: digital peripherals for
+    /// a core or system reset, the RTC watchdogs too for a system reset.
+    /// Memories are left alone.
+    pub fn reset_peripherals(&mut self, kind: ResetKind) {
+        if kind == ResetKind::Cpu {
+            return;
+        }
+        self.gpio = Gpio::new();
+        self.systimer = Systimer::new();
+        self.timg = [Timg::new(), Timg::new()];
+        self.intmatrix = IntMatrix::new();
+        self.deferred.clear();
+        self.pins_dirty = true;
+        if kind == ResetKind::System {
+            self.rtc_cntl = RtcCntl::new();
+        }
+    }
+
+    /// Earliest time at which a timer or watchdog needs [`Self::settle`].
+    pub fn next_event(&self) -> Option<SimTime> {
+        [
+            self.systimer.next_event(),
+            self.timg[0].next_event(),
+            self.timg[1].next_event(),
+            self.rtc_cntl.next_event(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    fn advance(&mut self, now: SimTime) -> Option<WatchdogReset> {
+        self.systimer.advance(now);
+        let mut resets = Vec::new();
+        for (g, timg) in (0u8..).zip(&mut self.timg) {
+            if let Some((at, kind)) = timg.advance(now) {
+                resets.push(WatchdogReset {
+                    at,
+                    kind,
+                    source: ResetSource::Mwdt(g),
+                });
+            }
+        }
+        if let Some((at, kind, which)) = self.rtc_cntl.advance(now) {
+            let source = match which {
+                RtcWatchdog::Rwdt => ResetSource::Rwdt,
+                RtcWatchdog::Swd => ResetSource::Swd,
+            };
+            resets.push(WatchdogReset { at, kind, source });
+        }
+        resets.into_iter().min_by_key(|r| (r.at, std::cmp::Reverse(r.kind)))
+    }
+
+    /// Bring timers and watchdogs up to `now`, apply the writes made by
+    /// the last instruction (at `now`) and update the interrupt sources.
+    /// Returns a watchdog reset if one is due; the caller performs it.
+    pub fn settle(&mut self, now: SimTime) -> Option<WatchdogReset> {
+        let mut reset = self.advance(now);
+        if reset.is_none() {
+            for (addr, v) in std::mem::take(&mut self.deferred) {
+                let block = addr & !(map::BLOCK - 1);
+                let off = addr - block;
+                match block {
+                    map::SYSTIMER_BASE => self.systimer.write(off, v, now),
+                    map::TIMG0_BASE => self.timg[0].write(off, v, now),
+                    map::TIMG1_BASE => self.timg[1].write(off, v, now),
+                    map::RTC_CNTL_BASE => self.rtc_cntl.write(off, v, now),
+                    _ => None,
+                };
+            }
+            reset = self.advance(now);
+        }
+        self.deferred.clear();
+        self.update_sources();
+        reset
+    }
+
+    fn update_sources(&mut self) {
+        let st = |bit: u32, src: u8| u64::from(bit != 0) << src;
+        let (g0, g1) = (self.timg[0].int_status(), self.timg[1].int_status());
+        let levels = (u64::from(self.systimer.int_status()) << source::SYSTIMER_TARGET0)
+            | st(g0 & 1, source::TG0_T0)
+            | st(g0 & 2, source::TG0_WDT)
+            | st(g1 & 1, source::TG1_T0)
+            | st(g1 & 2, source::TG1_WDT)
+            | st(u32::from(self.rtc_cntl.irq()), source::RTC_CORE);
+        self.intmatrix.set_sources(levels);
+    }
+
+    /// Interrupt lines for the hart: the controller's winning interrupt.
+    pub fn cpu_lines(&self) -> u32 {
+        self.intmatrix.cpu_lines()
+    }
+
+    /// Whether a write to `block + off` must wait for the hart's time.
+    fn timed_reg(block: u32, off: u32) -> bool {
+        match block {
+            map::SYSTIMER_BASE => Systimer::is_reg(off),
+            map::TIMG0_BASE | map::TIMG1_BASE => Timg::is_reg(off),
+            map::RTC_CNTL_BASE => RtcCntl::is_reg(off),
+            _ => false,
+        }
+    }
+
     fn periph_read(&mut self, addr: u32) -> u32 {
         let block = addr & !(map::BLOCK - 1);
         let off = addr - block;
@@ -143,6 +271,10 @@ impl SocBus {
             map::GPIO_BASE => self.gpio.read(off),
             map::IO_MUX_BASE => self.gpio.io_mux_read(off),
             map::SYSTIMER_BASE => self.systimer.read(off),
+            map::TIMG0_BASE => self.timg[0].read(off),
+            map::TIMG1_BASE => self.timg[1].read(off),
+            map::RTC_CNTL_BASE => self.rtc_cntl.read(off),
+            map::INTERRUPT_BASE => self.intmatrix.read(off),
             map::UART0_BASE => match off {
                 uart::reg::FIFO | uart::reg::STATUS => Some(0),
                 _ => None,
@@ -161,7 +293,13 @@ impl SocBus {
         let handled = match block {
             map::GPIO_BASE => self.gpio.write(off, v).map(|()| self.pins_dirty = true),
             map::IO_MUX_BASE => self.gpio.io_mux_write(off, v).map(|()| self.pins_dirty = true),
-            map::SYSTIMER_BASE => self.systimer.write(off, v).map(|_| ()),
+            map::SYSTIMER_BASE | map::TIMG0_BASE | map::TIMG1_BASE | map::RTC_CNTL_BASE
+                if Self::timed_reg(block, off) =>
+            {
+                self.deferred.push((addr, v));
+                Some(())
+            }
+            map::INTERRUPT_BASE => self.intmatrix.write(off, v),
             map::UART0_BASE if off == uart::reg::FIFO => {
                 self.uart_tx.push(v as u8);
                 Some(())
@@ -289,10 +427,56 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(b.take_uart_tx(), b"hi");
-        // RTC_CNTL watchdog config: not modelled, reads back.
-        b.write(0x6000_8090, Size::Word, 0x50d8_3aa1, AccessKind::Store)
+        // RTC_CNTL_OPTIONS0: not modelled, reads back.
+        b.write(0x6000_8000, Size::Word, 0x1c00_a000, AccessKind::Store)
             .unwrap();
-        assert_eq!(b.read(0x6000_8090, Size::Word, AccessKind::Load), Ok(0x50d8_3aa1));
-        assert_eq!(b.unmodelled().get(&0x6000_8090), Some(&2));
+        assert_eq!(b.read(0x6000_8000, Size::Word, AccessKind::Load), Ok(0x1c00_a000));
+        assert_eq!(b.unmodelled().get(&0x6000_8000), Some(&2));
+    }
+
+    #[test]
+    fn timed_writes_apply_at_settle_and_raise_interrupts() {
+        let mut b = SocBus::new();
+        let t = SimTime::from_us(10);
+        // Route SYSTIMER_TARGET0 to CPU interrupt 3, priority 2.
+        b.write(0x600c_2000 + 4 * 37, Size::Word, 3, AccessKind::Store).unwrap();
+        b.write(0x600c_2114 + 4 * 3, Size::Word, 2, AccessKind::Store).unwrap();
+        b.write(0x600c_2104, Size::Word, 1 << 3, AccessKind::Store).unwrap();
+        // Comparator 0: target 16 ticks after 10 µs (11 µs).
+        b.write(0x6002_3020, Size::Word, 176, AccessKind::Store).unwrap();
+        assert_eq!(b.systimer.read(0x20), Some(0), "deferred until settle");
+        assert_eq!(b.settle(t), None);
+        assert_eq!(b.systimer.read(0x20), Some(176));
+        for (off, v) in [(0x50, 1), (0x64, 1), (0x00, 0x4600_0000 | 1 << 24)] {
+            b.write(0x6002_3000 + off, Size::Word, v, AccessKind::Store).unwrap();
+            b.settle(t);
+        }
+        assert_eq!(b.next_event(), Some(SimTime::from_us(11)));
+        assert_eq!(b.cpu_lines(), 0);
+        b.settle(SimTime::from_us(11));
+        assert_eq!(b.cpu_lines(), 1 << 3);
+        assert_eq!(b.read(0x600c_20fc, Size::Word, AccessKind::Load), Ok(1 << (37 - 32)));
+        // ISR clears the interrupt.
+        b.write(0x6002_306c, Size::Word, 1, AccessKind::Store).unwrap();
+        b.settle(SimTime::from_us(12));
+        assert_eq!(b.cpu_lines(), 0);
+        assert!(b.unmodelled().is_empty());
+    }
+
+    #[test]
+    fn watchdog_resets_are_reported_and_clear_peripherals() {
+        let mut b = SocBus::new();
+        b.arm_boot_watchdogs(SimTime::ZERO);
+        assert_eq!(b.next_event(), Some(SimTime::from_ms(325)));
+        let r = b.settle(SimTime::from_ms(400)).unwrap();
+        assert_eq!(r.source, ResetSource::Mwdt(0));
+        assert_eq!(r.kind, ResetKind::System);
+        assert_eq!(r.at, SimTime::from_ms(325));
+        b.write(0x6000_4024, Size::Word, 1 << 2, AccessKind::Store).unwrap();
+        b.reset_peripherals(ResetKind::Core);
+        assert_eq!(b.gpio.read(0x20), Some(0), "GPIO_ENABLE back to reset");
+        assert_eq!(b.next_event(), Some(SimTime::from_ms(1000)), "core reset keeps the SWD");
+        b.reset_peripherals(ResetKind::System);
+        assert_eq!(b.next_event(), None);
     }
 }
