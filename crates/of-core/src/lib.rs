@@ -3,6 +3,15 @@
 //! Owns virtual time and the event queue. Every other engine (CPU cores,
 //! peripherals, digital and analog solvers) advances under this scheduler, so
 //! runs are deterministic and replayable.
+//!
+//! * [`Scheduler`]: the picosecond clock and event queue.
+//! * [`Engine`]: the trait every engine implements (`advance_to(t)`), and
+//!   [`Kernel`], which advances a set of engines in time slices under one
+//!   scheduler, delivering events and stopping at breakpoints.
+
+mod engine;
+
+pub use engine::{Engine, EngineError, EngineId, HOST, Kernel, KernelStats, Stop, SyncCtx};
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -22,9 +31,29 @@ impl SimTime {
     pub const fn from_us(us: u64) -> Self {
         Self(us * 1_000_000)
     }
+    /// From milliseconds.
+    pub const fn from_ms(ms: u64) -> Self {
+        Self(ms * 1_000_000_000)
+    }
     /// As seconds (lossy), for display and analog maths.
     pub fn as_secs_f64(self) -> f64 {
         self.0 as f64 * 1e-12
+    }
+    /// From seconds, rounded to the nearest picosecond (negative and NaN
+    /// give zero, values beyond the range saturate).
+    pub fn from_secs_f64(s: f64) -> Self {
+        let ps = (s * 1e12).round();
+        if ps.is_nan() || ps <= 0.0 {
+            Self::ZERO
+        } else if ps >= u64::MAX as f64 {
+            Self(u64::MAX)
+        } else {
+            Self(ps as u64)
+        }
+    }
+    /// `self + d`, saturating at the end of the range.
+    pub const fn saturating_add(self, d: SimTime) -> Self {
+        Self(self.0.saturating_add(d.0))
     }
 }
 
@@ -79,6 +108,25 @@ impl Scheduler {
     pub fn peek_time(&self) -> Option<SimTime> {
         self.queue.peek().map(|Reverse(e)| e.at)
     }
+    /// Pop the next event if it is due at or before `t` (time advances to
+    /// the event, never backwards).
+    pub fn pop_due(&mut self, t: SimTime) -> Option<Event> {
+        if self.peek_time()? <= t {
+            self.next_event()
+        } else {
+            None
+        }
+    }
+    /// Move the clock forward to `t` without firing events. Clamped so that
+    /// time never goes backwards or past a pending event.
+    pub fn advance_clock(&mut self, t: SimTime) {
+        let t = self.peek_time().map_or(t, |p| t.min(p));
+        self.now = self.now.max(t);
+    }
+    /// Number of pending events.
+    pub fn pending(&self) -> usize {
+        self.queue.len()
+    }
 }
 
 #[cfg(test)]
@@ -94,5 +142,20 @@ mod tests {
         let order: Vec<u32> = std::iter::from_fn(|| s.next_event()).map(|e| e.target).collect();
         assert_eq!(order, vec![2, 1, 3]);
         assert_eq!(s.now(), SimTime::from_ns(5));
+    }
+
+    #[test]
+    fn seconds_round_trip_and_clock_clamps() {
+        assert_eq!(SimTime::from_secs_f64(1.5e-6), SimTime::from_ns(1500));
+        assert_eq!(SimTime::from_secs_f64(-1.0), SimTime::ZERO);
+        assert_eq!(SimTime::from_ms(2).as_secs_f64(), 2e-3);
+        let mut s = Scheduler::new();
+        s.schedule(SimTime::from_ns(10), 1, 0);
+        s.advance_clock(SimTime::from_ns(50));
+        assert_eq!(s.now(), SimTime::from_ns(10), "clock stops at the pending event");
+        assert!(s.pop_due(SimTime::from_ns(9)).is_none());
+        assert_eq!(s.pop_due(SimTime::from_ns(10)).map(|e| e.target), Some(1));
+        s.advance_clock(SimTime::from_ns(5));
+        assert_eq!(s.now(), SimTime::from_ns(10), "never backwards");
     }
 }
