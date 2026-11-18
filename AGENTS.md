@@ -10,7 +10,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 
 **Current status and next tasks:** [`docs/ROADMAP.md`](docs/ROADMAP.md). Pick work from the current phase, tick boxes only when the work is verified and committed, and keep that file up to date.
 
-**Current phase: P1 Analog core is complete; P2 (ESP32-C3 MVP) is next.** The solver (`crates/of-analog`, the SPICE parser in `of-netlist::spice`, `ohmforge run`) matches ngspice within 1 % on the reference set; parts are bridged to solver devices (`of_components::analog`), the solver runs under the `of-core` kernel (`of_analog::AnalogEngine`), and an AMS1117-3.3 macromodel and the MVP board checks are in (section 3b). Phase one, the RISC-V CPU core (`crates/of-cpu-riscv`, for the ESP32-C3), passes the official riscv-tests (section 3a). The next step is the hart's `Engine` adapter and `of-soc-esp32c3`. See the roadmap for the checklists.
+**Current phase: P2 (ESP32-C3 MVP) is in progress.** P1 (analog core) is complete: the solver (`crates/of-analog`, the SPICE parser in `of-netlist::spice`, `ohmforge run`) matches ngspice within 1 % on the reference set; parts are bridged to solver devices (`of_components::analog`), the solver runs under the `of-core` kernel (`of_analog::AnalogEngine`), and an AMS1117-3.3 macromodel and the MVP board checks are in (section 3b). Phase one, the RISC-V CPU core (`crates/of-cpu-riscv`), passes the official riscv-tests (section 3a). The first P2 slice is in: ELF loading (`of-firmware`), the C3 memory map with GPIO/IO MUX, UART0 TX and SYSTIMER (`of-soc-esp32c3`), the SoC as a kernel `Engine`, and a blinky firmware that drives a parts-library LED end to end (section 3c). See the roadmap for the checklists.
 
 ## 2. Architecture in one minute
 
@@ -34,8 +34,9 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 | `of-cpu-riscv` | RV32IMC(+A) core, Zicsr, M-mode traps/interrupts, cycle timing, debugger API | Implemented: 62 unit tests, 75/77 riscv-tests |
 | `of-cpu-xtensa` | Xtensa LX6/LX7 core (phase 4) | Empty |
 | `of-cpu-qemu-ipc` | Client for the out-of-process QEMU sidecar (talks over IPC; never links QEMU) | Empty |
-| `of-soc-esp32c3`, `of-soc-esp32` | SoC memory maps and peripherals | Empty |
-| `of-firmware` | ELF, flash images, UF2, DWARF | Empty |
+| `of-soc-esp32c3` | ESP32-C3 memory map, peripherals (GPIO/IO MUX, UART0 TX, SYSTIMER), direct ELF boot, `Esp32c3Engine` for the kernel | First slice + tests (section 3c) |
+| `of-soc-esp32` | Classic ESP32 SoC (phase 4) | Empty |
+| `of-firmware` | ELF, flash images, UF2, DWARF | ELF32 RISC-V reader (segments, symbols) + tests |
 | `of-plugin-wasm` | Sandboxed WASM component host | Empty |
 | `of-instruments` | Scope, logic analyser, decoders, DMM, PSU | Empty |
 | `of-bom` | BOM aggregation, ZAR costing, CSV export | Working + test |
@@ -75,6 +76,15 @@ Internal dependencies point downwards only: `of-core` depends on nothing interna
 - **AMS1117 macromodel** (`parts/regulators/ams1117/ams1117.lib`, our own, CC-BY-SA-4.0): standard primitives only (depletion-NMOS quiescent current, ideal reference with supply coupling, Gm error amplifier with clamps, PNP driver into an NPN pass device, sense resistor and current limiter, POLY power into an `Rth`/`Cth` thermal node with a thermal limit near `tsd`). `v(x.tj)` is the rise over `tamb`. Matches the datasheet (Vout, line/load regulation, Iq ≈ 5 mA, dropout ≈ 1.1 V at 0.8 A, limit ≈ 1.1 A, ripple rejection ≈ 72 dB at 120 Hz) and ngspice (`ams1117_*` circuits). Not modelled: the ADJ variant, behaviour below about 1.5 V in, and electro-thermal coupling into other devices.
 - **Validation:** `tests/analytic.rs` (closed-form answers) and `tests/ngspice_compare.rs` (circuits in `tests/circuits`, golden CSVs in `tests/golden`, regenerated with `scripts/gen-ngspice-golden.sh [name ...]`). ngspice is run only as an external program to produce data: never link, vendor, port or ship it (its tree contains a GPL file). Ohmforge-only syntax (ESR/ESL, `rser`, `led` models) is rewritten for the reference run with `* ngspice-replace: FROM => TO` lines. Limits: 1 % of the reference signal's span (tran/DC); AC magnitude 1 % per point (floor 1e-3 of the peak) and phase 1 % of 180°; nested DC row by row. Fast-edge circuits set `tmax` so both simulators resolve the edges. `.include` paths are relative to the circuit file (the golden script rewrites them for ngspice). `of-components/tests` holds the bridge tests, AMS1117 datasheet checks, the MVP board built from parts (compared with the `mvp_board` golden) and a scripted-CPU co-simulation.
 
+## 3c. `of-soc-esp32c3` design notes
+
+- **Modules:** `map` (address map constants from the TRM), `bus` (`SocBus`: memories plus peripheral dispatch, implements `of_cpu_riscv::Bus`), `gpio` (GPIO, GPIO matrix output select, IO MUX `MCU_SEL`/`FUN_DRV`, `PinOut`), `uart` (UART0 TX capture), `systimer` (unit 0 counter at 16 MHz), `soc` (`Esp32c3`: hart + bus, `load_elf`, `run_slice`/`run_until`, time-stamped `PinEdge`s and `UartByte`s), `engine` (`Esp32c3Engine`, `PinLink`, `pin_code`).
+- **Memory map:** internal ROM (IBus 0x4000_0000, 384 KiB; ROM1 also at DBus 0x3ff0_0000), SRAM through IRAM 0x4037_c000 and DRAM 0x3fc7_c000 (same bytes; DRAM = IRAM - 0x70_0000), flash cache windows IROM 0x4200_0000 and DROM 0x3c00_0000 (separate backing, no MMU yet: each window is filled from the ELF segments at the same address), RTC fast 0x5000_0000, peripherals 0x6000_0000 to 0x600d_0fff. Fetch only from IRAM, IROM and ROM; ROM and flash are read-only to the hart (loaders use `SocBus::load`).
+- **Boot:** direct ELF boot for now (`Esp32c3::load_elf` copies segments, zero-fills `.bss`, sets the PC to `e_entry`). Booting through the real ROM (esp-rom-elfs) and flash images come later.
+- **Peripherals:** every peripheral access sets a sync request; `Esp32c3::run_slice` then stamps pin changes and UART bytes with `hart.local_time()` (end of the instruction) and latches SYSTIMER. Unmodelled peripheral registers read back the last write and are counted in `SocBus::unmodelled()`: check it when new firmware misbehaves. GPIO input reads see the level from the last sync (pre-access stops come with the mixed-signal sync item).
+- **Pins to analog:** `Esp32c3Engine` turns changes on linked pins into kernel events (`pin_code`: pin, drive strength, low/high/Hi-Z) at the exact hart time and returns early there; register it before the analog engine and map every code from `all_pin_codes(pin)` to `PinDriver` `v`/`r` with `PinOut::thevenin` (output resistance about 120/60/30/15 Ω per drive strength: an estimate, not a datasheet value).
+- **Test firmware:** `firmware/esp32c3-blinky` (`blinky.S`, `link.ld`, `build.sh`): bare-metal RV32IMC assembly built with zig (`pip install ziglang==0.17.1`). The 1.5 KB `blinky.elf` is committed so tests need no toolchain; CI rebuilds it and fails if it differs. Rebuild with `firmware/esp32c3-blinky/build.sh` after editing the source and commit both. Test firmware is our own code (AGPL-3.0-or-later); never commit third-party binaries.
+
 ## 4. Coding conventions
 
 - Rust **edition 2024**, **MSRV 1.95** (egui 0.37 needs it). Toolchain pinned to stable via `rust-toolchain.toml`.
@@ -103,9 +113,10 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo check -p of-app --features gui
-cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web -p of-cpu-riscv -p of-components
+cargo check --target wasm32-unknown-unknown -p of-core -p of-analog -p of-digital -p of-netlist -p of-parts -p of-bom -p of-web -p of-cpu-riscv -p of-components -p of-firmware -p of-soc-esp32c3
 .\scripts\build-riscv-tests.ps1                  # optional: fetch and build riscv-tests (needs zig or a RISC-V gcc)
 cargo test -p of-cpu-riscv --test riscv_tests -- --nocapture
+cargo test -p of-soc-esp32c3                     # blinky on the SoC and co-simulated with an LED
 cargo run -p of-cli -- --version
 cargo test -p of-analog --test ngspice_compare -- --nocapture   # prints the ngspice comparison table
 cargo run -p of-cli -- run crates/of-analog/tests/circuits/rc_step.cir --out rc.csv
@@ -117,7 +128,7 @@ Run all of these before proposing a commit; they mirror `.github/workflows/ci.ym
 ## 7. Git rules
 
 - **Do not commit without Stefan's approval.** Leave changes in the working tree, report what changed, and propose a commit breakdown with messages; commit only what he approves.
-- The remote is `origin` = <https://github.com/sjnorval/Ohmforge>. This history (P1 analog core, RISC-V core, kernel) is on branch `p1-analog-core`, which is unrelated to the remote `main` (an earlier scaffold and dense-matrix solver); until Stefan decides how to reconcile them (see the open PR), push only to `p1-analog-core` and never rewrite remote `main`. **Push only when Stefan explicitly asks**, never force-push, and never handle tokens (use the machine's existing git credentials). Before a push, check that no secrets or build artefacts are tracked.
+- The remote is `origin` = <https://github.com/sjnorval/Ohmforge>. `main` holds the merged P1 work (PR #7); new work goes on a feature branch (currently `p2-esp32c3-blinky`) and reaches `main` only through a pull request that Stefan merges. Never push to `main`. **Push only when Stefan explicitly asks**, never force-push, and never handle tokens (use the machine's existing git credentials). Before a push, check that no secrets or build artefacts are tracked.
 - Every commit is signed off: `git commit -s`.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`; small, logical commits.
 - Never rewrite or force-change existing history.
