@@ -1,5 +1,4 @@
-# Ohmforge workspace. "Ohmforge" and the "of-" crate prefix are placeholder
-# names; see README.md ("Renaming the project") before the first release.
+# Ohmforge workspace.
 [workspace]
 resolver = "3"
 members = ["crates/*"]
@@ -10,7 +9,7 @@ version = "0.0.1"
 edition = "2024"
 rust-version = "1.95"
 license = "AGPL-3.0-or-later"
-repository = "https://example.invalid/ohmforge" # placeholder, no remote yet
+repository = "https://github.com/sjnorval/Ohmforge"
 authors = ["Stefan Norval and Ohmforge contributors"]
 publish = false
 

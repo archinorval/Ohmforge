@@ -4,7 +4,7 @@ This file is the cross-tool agent guide (read by Grok Build, Codex, Cursor and o
 
 ## 1. What this project is
 
-**Ohmforge** (placeholder name) is an open-source, true-to-life **ESP32 circuit simulator in Rust**. It runs unmodified ESP32 firmware (ESP-IDF, Arduino-ESP32, esp-hal, MicroPython ELF files) against a SPICE-grade analog circuit in one deterministic simulation. Every placed part is a real, orderable part, so the bill of materials (MPN, supplier, ZAR cost) and a real-world build checklist come straight from the design. It targets a native desktop app and a WASM web app from one codebase.
+**Ohmforge** is an open-source, true-to-life **ESP32 circuit simulator in Rust**. It runs unmodified ESP32 firmware (ESP-IDF, Arduino-ESP32, esp-hal, MicroPython ELF files) against a SPICE-grade analog circuit in one deterministic simulation. Every placed part is a real, orderable part, so the bill of materials (MPN, supplier, ZAR cost) and a real-world build checklist come straight from the design. It targets a native desktop app and a WASM web app from one codebase.
 
 **Source of truth:** [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md). Read it before planning anything non-trivial. If your change contradicts it, stop and propose an update to the plan (or an RFC in `rfcs/`) instead of silently diverging. Do not edit `docs/DESIGN_AND_PLAN.md` unless the owner asks.
 
@@ -133,9 +133,9 @@ Run all of these before proposing a commit; they mirror `.github/workflows/ci.ym
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`; small, logical commits.
 - Never rewrite or force-change existing history.
 
-## 8. Placeholder name
+## 8. Project name
 
-"Ohmforge" and the `of-` / `of_` crate prefix are placeholders. Don't hard-code the name in new places beyond what's needed; `scripts/rename.ps1 -Name <name> -Prefix <prefix>` renames everything in one go.
+**Ohmforge** is the final project name; crates use the `of-` prefix (`of_` in Rust paths) and the CLI binary is `ohmforge`.
 
 ## 9. Windows environment notes
 

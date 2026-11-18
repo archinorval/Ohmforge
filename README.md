@@ -2,7 +2,7 @@
   <img src="assets/social-preview.png" alt="Ohmforge — emulate ESP32 in the browser. No board required." width="700">
 </p>
 
-> **Working name.** An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
+An open-source, true-to-life ESP32 circuit simulator written in Rust, with built-in bill-of-materials tracking.
 
 **Status:** pre-alpha. The SPICE-grade analog solver (`of-analog`, checked against ngspice), the RV32IMC CPU core (`of-cpu-riscv`, passing riscv-tests), the co-simulation kernel (`of-core`) and the parts-to-devices bridge (`of-components`) work; the ESP32-C3 SoC and the GUI are next. The plan is in [`docs/DESIGN_AND_PLAN.md`](docs/DESIGN_AND_PLAN.md); progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -49,10 +49,6 @@ cargo test --workspace
 cargo run -p of-cli -- --version
 cargo run -p of-app --features gui   # desktop window (pulls in egui)
 ```
-
-## Renaming the project
-
-"Ohmforge" and the `of-` crate prefix are placeholders. To rename, replace the strings `ohmforge`, `Ohmforge`, `of-` and `of_` across the repo and rename the `crates/of-*` folders. `scripts/rename.ps1` does this in one go (review the diff before committing).
 
 ## Licence
 
