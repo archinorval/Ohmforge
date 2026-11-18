@@ -2055,8 +2055,12 @@ dependencies = [
 name = "of-soc-esp32c3"
 version = "0.0.1"
 dependencies = [
+ "of-analog",
+ "of-components",
  "of-core",
  "of-cpu-riscv",
+ "of-firmware",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

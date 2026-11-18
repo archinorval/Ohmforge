@@ -1,0 +1,34 @@
+//! ESP32-C3 address map (TRM chapter 3, "System and Memory").
+
+/// Internal ROM, instruction bus (ROM0 + ROM1, 384 KiB).
+pub const IROM_INTERNAL: (u32, u32) = (0x4000_0000, 0x6_0000);
+/// Internal ROM, data bus alias of ROM1 (128 KiB).
+pub const DROM_INTERNAL: (u32, u32) = (0x3ff0_0000, 0x2_0000);
+/// SRAM through the instruction bus. The first 16 KiB are the ICache.
+pub const IRAM: (u32, u32) = (0x4037_c000, 0x6_4000);
+/// SRAM through the data bus. DRAM address = IRAM address - 0x0070_0000.
+pub const DRAM: (u32, u32) = (0x3fc7_c000, 0x6_4000);
+/// Flash through the instruction cache (8 MiB window).
+pub const IROM_FLASH: (u32, u32) = (0x4200_0000, 0x80_0000);
+/// Flash through the data cache (8 MiB window).
+pub const DROM_FLASH: (u32, u32) = (0x3c00_0000, 0x80_0000);
+/// RTC fast memory (8 KiB), same bytes on both buses.
+pub const RTC_FAST: (u32, u32) = (0x5000_0000, 0x2000);
+/// Peripheral register space.
+pub const PERIPHERALS: (u32, u32) = (0x6000_0000, 0xd_1000);
+
+/// UART0 registers.
+pub const UART0_BASE: u32 = 0x6000_0000;
+/// GPIO (and GPIO matrix) registers.
+pub const GPIO_BASE: u32 = 0x6000_4000;
+/// IO MUX registers.
+pub const IO_MUX_BASE: u32 = 0x6000_9000;
+/// SYSTIMER registers.
+pub const SYSTIMER_BASE: u32 = 0x6002_3000;
+/// Size of one peripheral's register block.
+pub const BLOCK: u32 = 0x1000;
+
+/// Whether `addr..addr+len` lies in `region`.
+pub fn within(region: (u32, u32), addr: u32, len: u32) -> bool {
+    addr >= region.0 && u64::from(addr - region.0) + u64::from(len) <= u64::from(region.1)
+}
