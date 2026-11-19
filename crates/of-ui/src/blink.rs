@@ -106,7 +106,13 @@ fn panel() -> Frame {
 
 fn instruments(ui: &mut Ui, sim: &mut Blink) {
     let uart = sim.uart();
-    let current = sim.current_ma();
+    let current = match sim.current_ma() {
+        Ok(current) => current,
+        Err(error) => {
+            ui.colored_label(LED_RED, format!("Simulation error: {error}"));
+            return;
+        }
+    };
     if ui.available_width() >= 820.0 {
         ui.columns(2, |columns| {
             schematic::show(&mut columns[0], current);
@@ -132,7 +138,13 @@ fn instruments(ui: &mut Ui, sim: &mut Blink) {
 fn scope_panel(ui: &mut Ui, sim: &mut Blink) {
     panel().show(ui, |ui| {
         ui.label(RichText::new("LED current").strong());
-        scope(ui, sim.time(), sim.trace());
+        let time = sim.time();
+        match sim.trace() {
+            Ok(trace) => scope(ui, time, trace),
+            Err(error) => {
+                ui.colored_label(LED_RED, format!("Simulation error: {error}"));
+            }
+        }
     });
 }
 

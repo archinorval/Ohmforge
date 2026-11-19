@@ -19,6 +19,8 @@ pub(super) const GPIO: u8 = 8;
 pub(super) const RESISTOR_REF: &str = "R1";
 pub(super) const LED_REF: &str = "D1";
 const DRIVER: &str = "u1_gpio8";
+const GPIO_NODE: &str = "v(gpio8)";
+const ANODE_NODE: &str = "v(led_a)";
 
 pub(super) struct Blink {
     kernel: Kernel,
@@ -114,29 +116,30 @@ impl Blink {
             .uart_text()
     }
 
-    fn analog(&mut self) -> &AnalogEngine {
+    fn analog(&mut self) -> Result<&AnalogEngine, Box<dyn Error>> {
         self.kernel
             .engine_as::<AnalogEngine>(self.analog)
-            .expect("registered analog solver")
+            .map(|engine| &*engine)
+            .ok_or_else(|| "analog solver is not registered".into())
     }
 
-    pub(super) fn current_ma(&mut self) -> f64 {
-        let analog = self.analog();
-        let gpio = analog.value("v(gpio8)").expect("GPIO8 voltage");
-        let anode = analog.value("v(led_a)").expect("LED anode voltage");
-        current_ma(gpio, anode)
+    pub(super) fn current_ma(&mut self) -> Result<f64, Box<dyn Error>> {
+        let analog = self.analog()?;
+        let gpio = analog.value(GPIO_NODE).ok_or("no GPIO8 voltage in the solution")?;
+        let anode = analog.value(ANODE_NODE).ok_or("no LED anode voltage in the solution")?;
+        Ok(current_ma(gpio, anode))
     }
 
-    pub(super) fn trace(&mut self) -> impl Iterator<Item = (f64, f64)> + '_ {
-        let trace = self.analog().waveforms().expect("waveform recording enabled");
-        let gpio = trace.signal("v(gpio8)").expect("recorded GPIO8 voltage");
-        let anode = trace.signal("v(led_a)").expect("recorded LED anode voltage");
-        trace
+    pub(super) fn trace(&mut self) -> Result<impl Iterator<Item = (f64, f64)> + '_, Box<dyn Error>> {
+        let trace = self.analog()?.waveforms().ok_or("waveform recording is off")?;
+        let gpio = trace.signal(GPIO_NODE).ok_or("GPIO8 voltage was not recorded")?;
+        let anode = trace.signal(ANODE_NODE).ok_or("LED anode voltage was not recorded")?;
+        Ok(trace
             .x
             .iter()
             .zip(gpio)
             .zip(anode)
-            .map(|((&t, &gpio), &anode)| (t, current_ma(gpio, anode)))
+            .map(|((&t, &gpio), &anode)| (t, current_ma(gpio, anode))))
     }
 }
 
@@ -155,17 +158,17 @@ mod tests {
         assert!(sim.uart().is_empty());
 
         sim.advance(125e-6).unwrap();
-        assert!((3.0..4.5).contains(&sim.current_ma()));
+        assert!((3.0..4.5).contains(&sim.current_ma().unwrap()));
         assert_eq!(sim.uart(), "ohmforge blinky\n");
 
         sim.advance(375e-6).unwrap();
-        assert!(sim.current_ma().abs() < 1e-3);
+        assert!(sim.current_ma().unwrap().abs() < 1e-3);
         sim.advance(625e-6).unwrap();
-        assert!((3.0..4.5).contains(&sim.current_ma()));
+        assert!((3.0..4.5).contains(&sim.current_ma().unwrap()));
 
         sim.advance(1.0).unwrap();
         assert!(sim.finished());
-        let trace: Vec<_> = sim.trace().collect();
+        let trace: Vec<_> = sim.trace().unwrap().collect();
         assert!(trace.iter().any(|&(_, ma)| ma > LED_ON_MA));
         assert!(trace.iter().any(|&(_, ma)| ma.abs() < 1e-3));
         assert!((trace.last().unwrap().0 - END.as_secs_f64()).abs() < 1e-12);
